@@ -1,0 +1,6 @@
+{
+  "name": "Tra Cứu Chứng Chỉ GDQP&AN",
+  "description": "Hệ thống tra cứu số thứ tự và ngày cấp chứng chỉ Giáo dục Quốc phòng và An ninh theo Mã số sinh viên (MSSV) tích hợp Google Drive và Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
