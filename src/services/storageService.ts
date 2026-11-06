@@ -111,6 +111,15 @@ export function saveRecords(
 }
 
 /**
+ * Cache an individual record into memory index
+ */
+export function cacheRecord(record: CertificateRecord): void {
+  if (record && record.mssv) {
+    recordsIndex.set(record.mssv.trim().toUpperCase(), record);
+  }
+}
+
+/**
  * 100% Exact match lookup by MSSV (< 1ms)
  * Automatically trims whitespace and capitalizes query
  */

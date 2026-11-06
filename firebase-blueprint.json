@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "CertificateRecord": {
+      "title": "CertificateRecord",
+      "description": "Bản ghi chứng chỉ Giáo dục Quốc phòng và An ninh theo từng sinh viên",
+      "type": "object",
+      "properties": {
+        "stt": { "type": "string", "description": "Số thứ tự lưu phôi bằng" },
+        "soHieuChungChi": { "type": "string", "description": "Số văn bằng in trên phôi" },
+        "soVaoSoGoc": { "type": "string", "description": "Số vào sổ gốc cấp chứng chỉ" },
+        "tenChungChi": { "type": "string", "description": "Tên loại chứng chỉ" },
+        "hoVaTen": { "type": "string", "description": "Họ và tên người học" },
+        "mssv": { "type": "string", "description": "Mã số sinh viên (Khóa chính)" },
+        "ngaySinh": { "type": "string", "description": "Ngày tháng năm sinh" },
+        "gioiTinh": { "type": "string", "description": "Giới tính (Nam/Nữ)" },
+        "ngayCap": { "type": "string", "description": "Ngày cấp chứng chỉ" },
+        "donViCap": { "type": "string", "description": "Đơn vị cấp phát" },
+        "khoaHoc": { "type": "string", "description": "Khóa đào tạo" },
+        "fileName": { "type": "string", "description": "Tên file Excel nguồn" }
+      },
+      "required": ["stt", "mssv", "hoVaTen", "ngayCap"]
+    },
+    "SyncMeta": {
+      "title": "SyncMeta",
+      "description": "Siêu dữ liệu thống kê trạng thái đồng bộ",
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "totalRecords": { "type": "number" },
+        "lastUpdated": { "type": "string" },
+        "fileCount": { "type": "number" },
+        "fileNames": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/gdqp_certificates/{mssv}": {
+      "schema": "CertificateRecord",
+      "description": "Danh bạ chứng chỉ tra cứu theo MSSV"
+    },
+    "/gdqp_meta/{metaId}": {
+      "schema": "SyncMeta",
+      "description": "Trạng thái cấu hình nguồn dữ liệu đám mây"
+    }
+  }
+}

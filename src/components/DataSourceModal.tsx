@@ -25,6 +25,7 @@ import { parseExcelFile } from '../services/excelParser';
 import { saveRecords, saveAppsScriptUrl, getSavedAppsScriptUrl, resetToDemo } from '../services/storageService';
 import { queryAppsScript } from '../services/appsScriptConnector';
 import { updateAdminPassword, revokeAdminSession } from '../services/adminAuthService';
+import { saveRecordsToCloud } from '../services/firestoreService';
 
 interface DataSourceModalProps {
   isOpen: boolean;
@@ -149,7 +150,17 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       // Save records to high-speed index
       saveRecords(scanResult.records, 'drive_oauth', scanResult.filesScanned);
       onDataUpdated();
-      setSuccessMsg(`Đồng bộ thành công ${scanResult.records.length} chứng chỉ từ ${scanResult.filesScanned.length} file Excel trên Google Drive!`);
+
+      // Automatically sync to Cloud Firestore so all other devices & IPs have this data
+      setScanProgress({ message: 'Đang lưu trữ lên máy chủ Đám mây (Cloud Firestore)...', percent: 85 });
+      await saveRecordsToCloud(
+        scanResult.records,
+        'drive_oauth',
+        scanResult.filesScanned,
+        (msg, pct) => setScanProgress({ message: msg, percent: pct })
+      );
+
+      setSuccessMsg(`Đồng bộ thành công ${scanResult.records.length} chứng chỉ từ Google Drive và đã lưu lên Đám mây (Cloud Firestore)! Tất cả các máy tính/điện thoại khác đều tra cứu được ngay.`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi quét thư mục Google Drive';
       setErrorMsg(msg);
@@ -166,6 +177,8 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
 
     setErrorMsg(null);
     setSuccessMsg(null);
+    setIsScanningDrive(true);
+    setScanProgress({ message: 'Đang đọc và phân tích file Excel...', percent: 10 });
 
     try {
       const allRecords: CertificateRecord[] = [];
@@ -183,12 +196,26 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         throw new Error('Không tìm thấy bản ghi chứng chỉ hợp lệ nào trong file Excel được tải lên. Hãy đảm bảo file có cột STT, Mã người học (MSSV), Họ tên, Số hiệu.');
       }
 
+      // Save locally
       saveRecords(allRecords, 'local_excel', loadedFileNames);
       onDataUpdated();
-      setSuccessMsg(`Đã nạp thành công ${allRecords.length} chứng chỉ từ ${loadedFileNames.length} file Excel.`);
+
+      // Save to Cloud Firestore so all other devices, IPs, and browsers have the exact data!
+      setScanProgress({ message: 'Đang lưu trữ lên đám mây Cloud Firestore cho toàn hệ thống...', percent: 25 });
+      await saveRecordsToCloud(
+        allRecords,
+        'local_excel',
+        loadedFileNames,
+        (msg, pct) => setScanProgress({ message: msg, percent: pct })
+      );
+
+      setSuccessMsg(`Đã nạp và lưu trữ vĩnh viễn ${allRecords.length} chứng chỉ lên Đám mây (Cloud Firestore)! Bất kỳ ai từ mọi thiết bị, điện thoại hoặc IP khác giờ đây đều có thể tra cứu ngay.`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi đọc file Excel';
       setErrorMsg(msg);
+    } finally {
+      setIsScanningDrive(false);
+      setScanProgress(null);
     }
   };
 
@@ -547,6 +574,28 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   className="hidden"
                 />
               </div>
+
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-950 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Tự động lưu trữ Đám mây (Cloud Firestore):</strong> Dữ liệu từ file Excel tải lên sẽ được lưu trữ vĩnh viễn trên máy chủ đám mây, giúp <strong>mọi thiết bị, điện thoại và địa chỉ IP khác</strong> đều có thể tra cứu ngay mà không cần tải lại file.
+                </div>
+              </div>
+
+              {scanProgress && (
+                <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="flex justify-between text-xs text-slate-700 font-medium">
+                    <span>{scanProgress.message}</span>
+                    <span className="font-mono font-bold text-emerald-600">{scanProgress.percent}%</span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${scanProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="text-xs text-slate-500 space-y-1">
                 <div>• Tự động bỏ qua các dòng tiêu đề trên cùng (đọc dòng 4 trở đi).</div>

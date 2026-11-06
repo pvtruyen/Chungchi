@@ -13,10 +13,22 @@ import { DataSourceModal } from './components/DataSourceModal';
 import { DeployGuideModal } from './components/DeployGuideModal';
 import { AdminPasswordModal } from './components/AdminPasswordModal';
 import { CertificateRecord, SyncStatus } from './types/certificate';
-import { initStorage, lookupByMssv, getSyncStatus, getSavedAppsScriptUrl } from './services/storageService';
+import { 
+  initStorage, 
+  lookupByMssv, 
+  cacheRecord, 
+  getSyncStatus, 
+  saveSyncStatus, 
+  getSavedAppsScriptUrl 
+} from './services/storageService';
 import { initAuth } from './services/firebaseAuth';
 import { queryAppsScript } from './services/appsScriptConnector';
 import { isAdminSessionActive } from './services/adminAuthService';
+import { 
+  fetchRecordFromCloud, 
+  fetchCloudSyncStatus, 
+  seedCloudIfEmpty 
+} from './services/firestoreService';
 import { 
   Shield, 
   HelpCircle, 
@@ -45,11 +57,28 @@ export default function App() {
 
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
 
-  // Initialize Auth & Storage on mount
+  // Initialize Auth & Storage and sync with Cloud Firestore across all devices
   useEffect(() => {
     initStorage();
     setSyncStatus(getSyncStatus());
     setIsAdminAuthenticated(isAdminSessionActive());
+
+    // Connect and synchronize with Cloud Firestore (so any IP/device has latest data)
+    const initCloud = async () => {
+      try {
+        const cloudMeta = await fetchCloudSyncStatus();
+        if (cloudMeta && cloudMeta.totalRecords > 0) {
+          setSyncStatus(cloudMeta);
+          saveSyncStatus(cloudMeta);
+        } else {
+          // If cloud has no records yet, seed initial demo records
+          await seedCloudIfEmpty();
+        }
+      } catch (err) {
+        console.warn('Đang sử dụng chế độ bộ nhớ cục bộ:', err);
+      }
+    };
+    initCloud();
 
     // Initialize Firebase Auth listener
     initAuth(
@@ -121,19 +150,29 @@ export default function App() {
       return;
     }
 
-    // Default fast in-memory index (< 1ms)
-    // Small artificial timeout (120ms) gives realistic smooth feedback on mobile
-    setTimeout(() => {
-      const match = lookupByMssv(cleanMssv);
-      if (match) {
-        setResult(match);
-        setNotFoundMssv(null);
-      } else {
-        setResult(null);
-        setNotFoundMssv(cleanMssv);
+    // 1. Fast in-memory index check (< 1ms)
+    let match = lookupByMssv(cleanMssv);
+
+    // 2. If not found in local browser cache (e.g. visiting from another device / IP), query Cloud Firestore
+    if (!match) {
+      try {
+        match = await fetchRecordFromCloud(cleanMssv);
+        if (match) {
+          cacheRecord(match);
+        }
+      } catch (e) {
+        console.warn('Lỗi tìm kiếm Firestore:', e);
       }
-      setIsSearching(false);
-    }, 120);
+    }
+
+    if (match) {
+      setResult(match);
+      setNotFoundMssv(null);
+    } else {
+      setResult(null);
+      setNotFoundMssv(cleanMssv);
+    }
+    setIsSearching(false);
   };
 
   const handleDataUpdated = () => {

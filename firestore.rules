@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Cho phép tra cứu chứng chỉ theo từng MSSV và cán bộ cập nhật danh sách
+    match /gdqp_certificates/{mssv} {
+      allow read, write: if true;
+    }
+
+    // Thông tin trạng thái đồng bộ và siêu dữ liệu hệ thống
+    match /gdqp_meta/{metaId} {
+      allow read, write: if true;
+    }
+  }
+}
