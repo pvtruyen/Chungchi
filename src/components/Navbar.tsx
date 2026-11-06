@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Database, BookOpen, Sparkles, FolderSync, CheckCircle2 } from 'lucide-react';
+import { Shield, Database, BookOpen, Sparkles, FolderSync, CheckCircle2, Lock, ShieldCheck } from 'lucide-react';
 import { SyncStatus } from '../types/certificate';
 
 interface NavbarProps {
@@ -8,6 +8,7 @@ interface NavbarProps {
   onOpenDeployGuideModal: () => void;
   isLoggedInGoogle: boolean;
   userEmail: string | null;
+  isAdmin: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -16,6 +17,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenDeployGuideModal,
   isLoggedInGoogle,
   userEmail,
+  isAdmin,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-emerald-800/40 text-white shadow-xl">
@@ -61,10 +63,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Status Badge */}
           <button
             onClick={onOpenDataSourceModal}
-            className="flex items-center space-x-2 text-xs bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 px-2.5 py-1.5 rounded-lg transition-all text-slate-300 hover:text-white"
-            title="Nhấn để đổi hoặc quản lý nguồn dữ liệu"
+            className={`flex items-center space-x-2 text-xs border px-2.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+              isAdmin
+                ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-200 hover:bg-emerald-950'
+                : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
+            }`}
+            title={isAdmin ? 'Quyền quản trị đang mở - Bấm để quản lý dữ liệu' : 'Bấm để mở cấu hình (yêu cầu mật khẩu)'}
           >
-            <Database className="w-3.5 h-3.5 text-emerald-400" />
+            {isAdmin ? (
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+            )}
             <span className="hidden sm:inline">Nguồn:</span>
             <span className="font-semibold text-emerald-300">
               {syncStatus.source === 'drive_oauth'
@@ -76,26 +86,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                 : 'Dữ liệu mẫu'}
             </span>
             <span className="bg-emerald-950 text-emerald-300 text-[10px] font-mono px-1.5 py-0.2 rounded border border-emerald-800">
-              {syncStatus.totalRecords} bản ghi
+              {syncStatus.totalRecords}
             </span>
           </button>
 
           {/* Guide / Deploy Button */}
           <button
             onClick={onOpenDeployGuideModal}
-            className="hidden sm:flex items-center space-x-1.5 text-xs bg-gradient-to-r from-amber-600/30 to-amber-700/30 hover:from-amber-600/40 hover:to-amber-700/40 text-amber-200 border border-amber-500/30 px-3 py-1.5 rounded-lg font-medium transition-all"
+            className="hidden sm:flex items-center space-x-1.5 text-xs bg-gradient-to-r from-amber-600/30 to-amber-700/30 hover:from-amber-600/40 hover:to-amber-700/40 text-amber-200 border border-amber-500/30 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5 text-amber-300" />
             <span>Hướng dẫn &amp; Script</span>
           </button>
 
-          {/* Sync Button */}
+          {/* Admin / Sync Button */}
           <button
             onClick={onOpenDataSourceModal}
             className="flex items-center space-x-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1.5 rounded-lg shadow-sm shadow-emerald-900 transition-all cursor-pointer"
+            title={isAdmin ? 'Quản lý nguồn dữ liệu' : 'Khu vực quản trị (cần mật khẩu)'}
           >
-            <FolderSync className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Đồng bộ</span>
+            {isAdmin ? <FolderSync className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5 text-amber-300" />}
+            <span>{isAdmin ? 'Quản trị' : 'Đồng bộ'}</span>
           </button>
         </div>
       </div>

@@ -11,10 +11,12 @@ import { StudentDetailCard } from './components/StudentDetailCard';
 import { NotFoundState } from './components/NotFoundState';
 import { DataSourceModal } from './components/DataSourceModal';
 import { DeployGuideModal } from './components/DeployGuideModal';
+import { AdminPasswordModal } from './components/AdminPasswordModal';
 import { CertificateRecord, SyncStatus } from './types/certificate';
 import { initStorage, lookupByMssv, getSyncStatus, getSavedAppsScriptUrl } from './services/storageService';
 import { initAuth } from './services/firebaseAuth';
 import { queryAppsScript } from './services/appsScriptConnector';
+import { isAdminSessionActive } from './services/adminAuthService';
 import { 
   Shield, 
   HelpCircle, 
@@ -38,6 +40,8 @@ export default function App() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false);
   const [isDeployGuideModalOpen, setIsDeployGuideModalOpen] = useState(false);
+  const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
 
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
 
@@ -45,6 +49,7 @@ export default function App() {
   useEffect(() => {
     initStorage();
     setSyncStatus(getSyncStatus());
+    setIsAdminAuthenticated(isAdminSessionActive());
 
     // Initialize Firebase Auth listener
     initAuth(
@@ -58,6 +63,26 @@ export default function App() {
       }
     );
   }, []);
+
+  const handleRequestOpenDataSourceModal = () => {
+    if (isAdminSessionActive()) {
+      setIsAdminAuthenticated(true);
+      setIsDataSourceModalOpen(true);
+    } else {
+      setIsAdminPasswordModalOpen(true);
+    }
+  };
+
+  const handleAdminPasswordSuccess = () => {
+    setIsAdminAuthenticated(true);
+    setIsAdminPasswordModalOpen(false);
+    setIsDataSourceModalOpen(true);
+  };
+
+  const handleDataSourceModalClose = () => {
+    setIsDataSourceModalOpen(false);
+    setIsAdminAuthenticated(isAdminSessionActive());
+  };
 
   // Execute Search
   const handleSearch = async (rawMssv: string) => {
@@ -124,10 +149,11 @@ export default function App() {
       {/* Navigation Bar */}
       <Navbar
         syncStatus={syncStatus}
-        onOpenDataSourceModal={() => setIsDataSourceModalOpen(true)}
+        onOpenDataSourceModal={handleRequestOpenDataSourceModal}
         onOpenDeployGuideModal={() => setIsDeployGuideModalOpen(true)}
         isLoggedInGoogle={isLoggedInGoogle}
         userEmail={userEmail}
+        isAdmin={isAdminAuthenticated}
       />
 
       {/* Hero & Search Form */}
@@ -277,7 +303,7 @@ export default function App() {
             </button>
             <span className="text-slate-700">•</span>
             <button
-              onClick={() => setIsDataSourceModalOpen(true)}
+              onClick={handleRequestOpenDataSourceModal}
               className="text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
             >
               Nguồn dữ liệu
@@ -289,7 +315,7 @@ export default function App() {
       {/* Modals */}
       <DataSourceModal
         isOpen={isDataSourceModalOpen}
-        onClose={() => setIsDataSourceModalOpen(false)}
+        onClose={handleDataSourceModalClose}
         syncStatus={syncStatus}
         onDataUpdated={handleDataUpdated}
         isLoggedInGoogle={isLoggedInGoogle}
@@ -302,6 +328,12 @@ export default function App() {
           setIsLoggedInGoogle(false);
           setUserEmail(null);
         }}
+      />
+
+      <AdminPasswordModal
+        isOpen={isAdminPasswordModalOpen}
+        onClose={() => setIsAdminPasswordModalOpen(false)}
+        onSuccess={handleAdminPasswordSuccess}
       />
 
       <DeployGuideModal

@@ -13,7 +13,10 @@ import {
   LogOut, 
   ExternalLink,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  Lock,
+  KeyRound,
+  ShieldCheck
 } from 'lucide-react';
 import { SyncStatus, DataSourceType, CertificateRecord } from '../types/certificate';
 import { googleSignIn, logoutGoogle } from '../services/firebaseAuth';
@@ -21,6 +24,7 @@ import { findGdqpFolder, scanDriveFolderForCertificates } from '../services/goog
 import { parseExcelFile } from '../services/excelParser';
 import { saveRecords, saveAppsScriptUrl, getSavedAppsScriptUrl, resetToDemo } from '../services/storageService';
 import { queryAppsScript } from '../services/appsScriptConnector';
+import { updateAdminPassword, revokeAdminSession } from '../services/adminAuthService';
 
 interface DataSourceModalProps {
   isOpen: boolean;
@@ -50,9 +54,40 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isTestingAppsScript, setIsTestingAppsScript] = useState(false);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
+
+  const handleLockAdminSession = () => {
+    revokeAdminSession();
+    onClose();
+  };
+
+  const handleChangePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 4) {
+      setErrorMsg('Mật khẩu mới phải có ít nhất 4 ký tự.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setErrorMsg('Mật khẩu xác nhận không khớp.');
+      return;
+    }
+
+    const ok = updateAdminPassword(newPassword);
+    if (ok) {
+      setSuccessMsg('Đã đổi mật khẩu quản trị viên thành công!');
+      setShowPasswordChange(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      setErrorMsg(null);
+    } else {
+      setErrorMsg('Không thể đổi mật khẩu. Vui lòng thử lại.');
+    }
+  };
 
   // Handle Google Drive OAuth login
   const handleGoogleLogin = async () => {
@@ -231,6 +266,78 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
             {syncStatus.totalRecords} chứng chỉ đã nạp
           </div>
         </div>
+
+        {/* Admin Session Security Bar */}
+        <div className="bg-slate-800 text-slate-300 px-6 py-2.5 flex items-center justify-between text-xs border-b border-slate-700">
+          <div className="flex items-center space-x-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span className="text-emerald-300 font-semibold">Quyền Cán bộ Quản lý</span>
+            <span className="text-slate-500 hidden sm:inline">• Được phép cập nhật dữ liệu</span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setShowPasswordChange(!showPasswordChange)}
+              className="text-xs text-amber-300 hover:text-amber-200 hover:underline flex items-center gap-1 cursor-pointer font-medium"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{showPasswordChange ? 'Đóng đổi MK' : 'Đổi mật khẩu'}</span>
+            </button>
+            <span className="text-slate-600">|</span>
+            <button
+              onClick={handleLockAdminSession}
+              className="text-xs text-rose-300 hover:text-rose-200 hover:underline flex items-center gap-1 cursor-pointer font-medium"
+              title="Khóa lại quyền quản trị khi rời máy tính"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Khóa quản trị</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Password Change Drawer (if opened) */}
+        {showPasswordChange && (
+          <form
+            onSubmit={handleChangePasswordSubmit}
+            className="bg-amber-50/90 border-b border-amber-200 px-6 py-3.5 text-xs text-amber-950 space-y-2.5 animate-in fade-in"
+          >
+            <div className="font-bold flex items-center gap-1.5 text-amber-900">
+              <KeyRound className="w-4 h-4 text-amber-700" />
+              Đổi Mật Khẩu Quản Trị Viên Mới:
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Nhập mật khẩu mới (tối thiểu 4 ký tự)..."
+                className="p-2 rounded-lg border border-amber-300 bg-white text-xs font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Xác nhận lại mật khẩu mới..."
+                className="p-2 rounded-lg border border-amber-300 bg-white text-xs font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPasswordChange(false)}
+                className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-700 font-medium cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-sm cursor-pointer"
+              >
+                Lưu Mật Khẩu Mới
+              </button>
+            </div>
+          </form>
+        )}
 
         {/* Feedback messages */}
         {errorMsg && (
