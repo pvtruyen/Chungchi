@@ -43,3 +43,24 @@ export interface SyncStatus {
   appsScriptUrl?: string;
   driveFolderFound?: boolean;
 }
+
+export interface SearchHistoryItem {
+  id: string;
+  mssv: string;
+  hoVaTen: string;
+  stt: number | string;
+  ngayCap: string;
+  soHieuChungChi: string;
+  soVaoSoGoc: string;
+  tenChungChi?: string;
+  donViCap?: string;
+  khoaHoc?: string;
+  ngaySinh?: string;
+  gioiTinh?: string;
+  fileName?: string;
+  timestamp: string;
+  timeFormatted: string;
+  daPhat: boolean;
+  ngayPhat?: string;
+  status: 'found' | 'not_found';
+}

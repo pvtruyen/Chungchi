@@ -31,6 +31,26 @@
         "fileCount": { "type": "number" },
         "fileNames": { "type": "array" }
       }
+    },
+    "SearchHistoryRecord": {
+      "title": "SearchHistoryRecord",
+      "description": "Lịch sử sinh viên tra cứu chứng chỉ phục vụ cán bộ cấp phát theo dõi",
+      "type": "object",
+      "properties": {
+        "mssv": { "type": "string" },
+        "hoVaTen": { "type": "string" },
+        "stt": { "type": "string" },
+        "ngayCap": { "type": "string" },
+        "soHieuChungChi": { "type": "string" },
+        "soVaoSoGoc": { "type": "string" },
+        "tenChungChi": { "type": "string" },
+        "donViCap": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "timeFormatted": { "type": "string" },
+        "daPhat": { "type": "boolean" },
+        "status": { "type": "string" }
+      },
+      "required": ["mssv", "timestamp"]
     }
   },
   "firestore": {
@@ -41,6 +61,10 @@
     "/gdqp_meta/{metaId}": {
       "schema": "SyncMeta",
       "description": "Trạng thái cấu hình nguồn dữ liệu đám mây"
+    },
+    "/gdqp_search_history/{historyId}": {
+      "schema": "SearchHistoryRecord",
+      "description": "Lịch sử tra cứu cấp phát chứng chỉ"
     }
   }
 }

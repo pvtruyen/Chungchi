@@ -164,25 +164,39 @@ function searchInGoogleSheet(sheetId, targetMssv, fileName) {
     let colNgayCap = 7;
     let dataStartRow = 3; // Dòng 4 (index 3)
 
-    for (let r = 0; r < Math.min(5, data.length); r++) {
+    let colHoDem = -1;
+    let colTen = -1;
+
+    for (let r = 0; r < Math.min(8, data.length); r++) {
       for (let c = 0; c < data[r].length; c++) {
-        const val = String(data[r][c] || '').toLowerCase().trim();
-        if (val.includes('mã người học') || val.includes('mssv') || val.includes('mã sinh viên')) {
+        const val = String(data[r][c] || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/đ/g, 'd')
+          .replace(/Đ/g, 'D')
+          .toLowerCase()
+          .trim();
+
+        if (val.includes('ma nguoi hoc') || val.includes('mssv') || val.includes('ma sinh vien')) {
           colMssv = c;
           dataStartRow = r + 1;
-        } else if (val === 'stt' || val.includes('thứ tự')) {
+        } else if (val === 'stt' || val.includes('thu tu')) {
           colStt = c;
-        } else if (val.includes('họ') && val.includes('tên')) {
+        } else if (val.includes('ho chu dem va ten') || val.includes('ho va ten') || val.includes('ho ten') || (val.includes('ho') && val.includes('ten'))) {
           colHoTen = c;
-        } else if (val.includes('số hiệu')) {
+        } else if (val.includes('ho chu dem') || val.includes('ho va chu dem') || (val.includes('ho') && !val.includes('ten') && !val.includes('ngay'))) {
+          colHoDem = c;
+        } else if (val === 'ten' || val.includes('ten sinh vien') || val.includes('ten nguoi hoc')) {
+          colTen = c;
+        } else if (val.includes('so hieu') || val.includes('so van bang')) {
           colSoHieu = c;
-        } else if (val.includes('số vào sổ') || val.includes('số quản lý')) {
+        } else if (val.includes('so vao so') || val.includes('so quan ly')) {
           colSoSo = c;
-        } else if (val.includes('ngày cấp')) {
+        } else if (val.includes('ngay cap') || val.includes('ngay thang cap') || val.includes('ngay ky')) {
           colNgayCap = c;
         }
       }
-      if (colMssv !== -1) break;
+      if (colMssv !== -1 && (colHoTen !== -1 || (colHoDem !== -1 && colTen !== -1))) break;
     }
 
     // Quét từng dòng dữ liệu từ dataStartRow
@@ -201,18 +215,35 @@ function searchInGoogleSheet(sheetId, targetMssv, fileName) {
       }
 
       if (rowMssv === targetMssv) {
+        let fullName = '';
+        if (colHoDem !== -1 && colTen !== -1) {
+          fullName = (String(row[colHoDem] || '') + ' ' + String(row[colTen] || '')).trim();
+        }
+        if (!fullName && colHoTen !== -1) {
+          fullName = String(row[colHoTen] || '').trim();
+          if (colHoTen + 1 < row.length && !row[colHoTen + 1].toString().match(/\d/)) {
+            const nextPart = String(row[colHoTen + 1] || '').trim();
+            if (nextPart && nextPart.length <= 15) {
+              fullName = (fullName + ' ' + nextPart).trim();
+            }
+          }
+        }
+        if (!fullName) {
+          fullName = 'Sinh viên ' + targetMssv;
+        }
+
         return {
           id: targetMssv + '_' + r,
           stt: row[colStt] || (r - dataStartRow + 1),
           soHieuChungChi: String(row[colSoHieu] || 'QP-' + targetMssv),
           soVaoSoGoc: String(row[colSoSo] || (r - dataStartRow + 1) + '/GDQP'),
           tenChungChi: 'Chứng chỉ Giáo dục Quốc phòng và An ninh',
-          hoVaTen: String(row[colHoTen] || 'Sinh viên GDQP'),
+          hoVaTen: fullName,
           mssv: targetMssv,
           ngaySinh: formatDate(row[colNgaySinh]),
           gioiTinh: String(row[colGioiTinh] || 'Nam'),
           ngayCap: formatDate(row[colNgayCap]) || '15/10/2025',
-          donViCap: 'Trung tâm GDQP&AN',
+          donViCap: 'Trung tâm GDQP&AN - Đại học Cần Thơ',
           fileName: fileName
         };
       }

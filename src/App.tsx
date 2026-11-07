@@ -12,6 +12,7 @@ import { NotFoundState } from './components/NotFoundState';
 import { DataSourceModal } from './components/DataSourceModal';
 import { DeployGuideModal } from './components/DeployGuideModal';
 import { AdminPasswordModal } from './components/AdminPasswordModal';
+import { SearchHistoryModal } from './components/SearchHistoryModal';
 import { CertificateRecord, SyncStatus } from './types/certificate';
 import { 
   initStorage, 
@@ -27,7 +28,8 @@ import { isAdminSessionActive } from './services/adminAuthService';
 import { 
   fetchRecordFromCloud, 
   fetchCloudSyncStatus, 
-  seedCloudIfEmpty 
+  seedCloudIfEmpty,
+  recordSearchEvent
 } from './services/firestoreService';
 import { 
   Shield, 
@@ -54,6 +56,8 @@ export default function App() {
   const [isDeployGuideModalOpen, setIsDeployGuideModalOpen] = useState(false);
   const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [adminActionTarget, setAdminActionTarget] = useState<'data_source' | 'history' | null>(null);
 
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
 
@@ -94,6 +98,7 @@ export default function App() {
   }, []);
 
   const handleRequestOpenDataSourceModal = () => {
+    setAdminActionTarget('data_source');
     if (isAdminSessionActive()) {
       setIsAdminAuthenticated(true);
       setIsDataSourceModalOpen(true);
@@ -102,10 +107,25 @@ export default function App() {
     }
   };
 
+  const handleOpenHistoryModal = () => {
+    setAdminActionTarget('history');
+    if (isAdminSessionActive()) {
+      setIsAdminAuthenticated(true);
+      setIsHistoryModalOpen(true);
+    } else {
+      setIsAdminPasswordModalOpen(true);
+    }
+  };
+
   const handleAdminPasswordSuccess = () => {
     setIsAdminAuthenticated(true);
     setIsAdminPasswordModalOpen(false);
-    setIsDataSourceModalOpen(true);
+    if (adminActionTarget === 'history') {
+      setIsHistoryModalOpen(true);
+    } else {
+      setIsDataSourceModalOpen(true);
+    }
+    setAdminActionTarget(null);
   };
 
   const handleDataSourceModalClose = () => {
@@ -131,9 +151,11 @@ export default function App() {
         if (response.success && response.found && response.data) {
           setResult(response.data);
           setNotFoundMssv(null);
+          recordSearchEvent(response.data, cleanMssv).catch(console.warn);
         } else {
           setResult(null);
           setNotFoundMssv(cleanMssv);
+          recordSearchEvent(null, cleanMssv).catch(console.warn);
         }
       } catch (err) {
         console.error('Lỗi tra cứu Apps Script:', err);
@@ -141,8 +163,10 @@ export default function App() {
         const local = lookupByMssv(cleanMssv);
         if (local) {
           setResult(local);
+          recordSearchEvent(local, cleanMssv).catch(console.warn);
         } else {
           setNotFoundMssv(cleanMssv);
+          recordSearchEvent(null, cleanMssv).catch(console.warn);
         }
       } finally {
         setIsSearching(false);
@@ -168,9 +192,11 @@ export default function App() {
     if (match) {
       setResult(match);
       setNotFoundMssv(null);
+      recordSearchEvent(match, cleanMssv).catch(console.warn);
     } else {
       setResult(null);
       setNotFoundMssv(cleanMssv);
+      recordSearchEvent(null, cleanMssv).catch(console.warn);
     }
     setIsSearching(false);
   };
@@ -190,6 +216,7 @@ export default function App() {
         syncStatus={syncStatus}
         onOpenDataSourceModal={handleRequestOpenDataSourceModal}
         onOpenDeployGuideModal={() => setIsDeployGuideModalOpen(true)}
+        onOpenHistoryModal={handleOpenHistoryModal}
         isLoggedInGoogle={isLoggedInGoogle}
         userEmail={userEmail}
         isAdmin={isAdminAuthenticated}
@@ -324,7 +351,7 @@ export default function App() {
             </div>
             <div>
               <div className="font-bold text-slate-200">
-                Trường Đại học Cần Thơ (CTU) — Trung tâm Giáo dục Quốc phòng và An ninh
+                Đại học Cần Thơ (CTU) — Trung tâm Giáo dục Quốc phòng và An ninh
               </div>
               <div className="text-[11px] text-slate-500">
                 Hệ thống Tra cứu &amp; Cấp phát Chứng chỉ Giáo dục Quốc phòng và An ninh
@@ -378,6 +405,11 @@ export default function App() {
       <DeployGuideModal
         isOpen={isDeployGuideModalOpen}
         onClose={() => setIsDeployGuideModalOpen(false)}
+      />
+
+      <SearchHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
       />
     </div>
   );

@@ -47,7 +47,7 @@ export const SearchHero: React.FC<SearchHeroProps> = ({
             className="w-4 h-4 object-contain rounded-full bg-white/90 p-0.5 inline-block"
           />
           <span className="font-semibold tracking-wide">
-            Trường Đại học Cần Thơ — Cổng tra cứu phục vụ cấp phát chứng chỉ
+            Đại học Cần Thơ — Cổng tra cứu phục vụ cấp phát chứng chỉ
           </span>
         </div>
 

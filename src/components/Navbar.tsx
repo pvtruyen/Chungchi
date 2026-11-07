@@ -1,11 +1,12 @@
 import React from 'react';
-import { Shield, Database, BookOpen, Sparkles, FolderSync, CheckCircle2, Lock, ShieldCheck } from 'lucide-react';
+import { Shield, Database, BookOpen, Sparkles, FolderSync, CheckCircle2, Lock, ShieldCheck, Clock } from 'lucide-react';
 import { SyncStatus } from '../types/certificate';
 
 interface NavbarProps {
   syncStatus: SyncStatus;
   onOpenDataSourceModal: () => void;
   onOpenDeployGuideModal: () => void;
+  onOpenHistoryModal: () => void;
   isLoggedInGoogle: boolean;
   userEmail: string | null;
   isAdmin: boolean;
@@ -15,6 +16,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   syncStatus,
   onOpenDataSourceModal,
   onOpenDeployGuideModal,
+  onOpenHistoryModal,
   isLoggedInGoogle,
   userEmail,
   isAdmin,
@@ -27,7 +29,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="relative flex items-center justify-center w-12 h-12 rounded-xl bg-white p-1 shadow-md shadow-emerald-950/50 border border-amber-300/40 shrink-0">
             <img
               src="https://www.ctu.edu.vn/images/branding/logo/CTU_logo.png"
-              alt="Logo Trường Đại học Cần Thơ (CTU)"
+              alt="Logo Đại học Cần Thơ (CTU)"
               className="w-full h-full object-contain"
               onError={(e) => {
                 // Graceful fallback if offline or blocked
@@ -90,10 +92,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
+          {/* Lịch sử tra cứu Button */}
+          <button
+            onClick={onOpenHistoryModal}
+            className="flex items-center space-x-1.5 text-xs bg-slate-800/90 hover:bg-slate-800 text-amber-300 border border-amber-500/40 px-2.5 py-1.5 rounded-lg font-semibold transition-all cursor-pointer shadow-sm hover:border-amber-400"
+            title="Xem lịch sử sinh viên vừa tra cứu chứng chỉ (Dành cho Cán bộ phát bằng)"
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">Lịch sử tra cứu</span>
+            <span className="md:hidden">Lịch sử</span>
+          </button>
+
           {/* Guide / Deploy Button */}
           <button
             onClick={onOpenDeployGuideModal}
-            className="hidden sm:flex items-center space-x-1.5 text-xs bg-gradient-to-r from-amber-600/30 to-amber-700/30 hover:from-amber-600/40 hover:to-amber-700/40 text-amber-200 border border-amber-500/30 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer"
+            className="hidden lg:flex items-center space-x-1.5 text-xs bg-gradient-to-r from-amber-600/30 to-amber-700/30 hover:from-amber-600/40 hover:to-amber-700/40 text-amber-200 border border-amber-500/30 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5 text-amber-300" />
             <span>Hướng dẫn &amp; Script</span>

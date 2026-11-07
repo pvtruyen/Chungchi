@@ -10,5 +10,10 @@ service cloud.firestore {
     match /gdqp_meta/{metaId} {
       allow read, write: if true;
     }
+
+    // Lịch sử tra cứu chứng chỉ phục vụ cán bộ cấp phát theo dõi
+    match /gdqp_search_history/{historyId} {
+      allow read, write: if true;
+    }
   }
 }
