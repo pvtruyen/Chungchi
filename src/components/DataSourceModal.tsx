@@ -70,6 +70,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -181,8 +182,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       setScanProgress(null);
     }
   };
-
-  const [isDragging, setIsDragging] = useState(false);
 
   // Process files sequentially (from input or drag-and-drop)
   const processFilesSequentially = async (files: FileList | File[]) => {
