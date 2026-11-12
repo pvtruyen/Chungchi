@@ -111,6 +111,76 @@ export function saveRecords(
 }
 
 /**
+ * Get all loaded records as array
+ */
+export function getAllLoadedRecords(): CertificateRecord[] {
+  return Array.from(recordsIndex.values());
+}
+
+/**
+ * Append or update new records into local storage and index
+ */
+export function appendRecords(
+  newRecords: CertificateRecord[],
+  source: DataSourceType,
+  fileName: string
+): { total: number; added: number } {
+  let added = 0;
+  for (const r of newRecords) {
+    if (r.mssv) {
+      const clean = r.mssv.trim().toUpperCase();
+      if (!recordsIndex.has(clean)) {
+        added++;
+      }
+      recordsIndex.set(clean, r);
+    }
+  }
+
+  const allRecords = Array.from(recordsIndex.values());
+  try {
+    localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(allRecords));
+  } catch (e) {
+    console.warn('Không thể lưu toàn bộ vào LocalStorage (vượt quota):', e);
+  }
+
+  const currentStatus = getSyncStatus();
+  const existingFiles = Array.isArray(currentStatus.fileNames) ? currentStatus.fileNames : [];
+  const updatedFiles = existingFiles.includes(fileName) ? existingFiles : [...existingFiles, fileName];
+
+  saveSyncStatus({
+    source,
+    totalRecords: recordsIndex.size,
+    lastUpdated: new Date().toLocaleString('vi-VN'),
+    fileCount: updatedFiles.length,
+    fileNames: updatedFiles,
+    appsScriptUrl: getSavedAppsScriptUrl(),
+  });
+
+  return { total: recordsIndex.size, added };
+}
+
+/**
+ * Clear all locally stored records
+ */
+export function clearAllLocalRecords(): void {
+  recordsIndex.clear();
+  try {
+    localStorage.removeItem(STORAGE_KEY_RECORDS);
+  } catch (e) {
+    console.error('Lỗi xóa LocalStorage records:', e);
+  }
+
+  saveSyncStatus({
+    source: 'demo_data',
+    totalRecords: 0,
+    lastUpdated: new Date().toLocaleString('vi-VN'),
+    fileCount: 0,
+    fileNames: [],
+    appsScriptUrl: getSavedAppsScriptUrl(),
+  });
+}
+
+/**
  * Cache an individual record into memory index
  */
 export function cacheRecord(record: CertificateRecord): void {

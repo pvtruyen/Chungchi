@@ -289,10 +289,10 @@ export default function App() {
                   2
                 </div>
                 <h4 className="font-bold text-white text-base mb-1.5">
-                  Lưu STT &amp; Số vào sổ gốc
+                  Lưu Số vào sổ gốc &amp; Số hiệu
                 </h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Màn hình sẽ hiện thẻ nổi bật chứa <strong className="text-amber-300">SỐ THỨ TỰ</strong> và <strong className="text-emerald-300">SỐ VÀO SỔ GỐC</strong>. Hãy chụp màn hình hoặc giữ nguyên trang.
+                  Màn hình sẽ hiện 02 thẻ nổi bật chứa <strong className="text-amber-300">SỐ VÀO SỔ GỐC</strong> và <strong className="text-emerald-300">SỐ HIỆU CHỨNG CHỈ</strong>. Hãy chụp màn hình hoặc giữ nguyên trang.
                 </p>
               </div>
 
@@ -306,7 +306,7 @@ export default function App() {
                   Đọc cho Cán bộ phát
                 </h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Khi đến lượt tại bàn, đọc to <strong className="text-emerald-300">STT</strong> và <strong className="text-emerald-300">Số vào sổ gốc</strong> để cán bộ rút chứng chỉ chính xác trong vài giây.
+                  Khi đến lượt tại bàn, đọc to <strong className="text-amber-300">Số vào sổ gốc</strong> và <strong className="text-emerald-300">Số hiệu chứng chỉ</strong> để cán bộ rút chứng chỉ chính xác trong vài giây.
                 </p>
               </div>
             </div>

@@ -16,16 +16,28 @@ import {
   FolderOpen,
   Lock,
   KeyRound,
-  ShieldCheck
+  ShieldCheck,
+  Trash2
 } from 'lucide-react';
 import { SyncStatus, DataSourceType, CertificateRecord } from '../types/certificate';
 import { googleSignIn, logoutGoogle } from '../services/firebaseAuth';
 import { findGdqpFolder, scanDriveFolderForCertificates } from '../services/googleDriveService';
 import { parseExcelFile } from '../services/excelParser';
-import { saveRecords, saveAppsScriptUrl, getSavedAppsScriptUrl, resetToDemo } from '../services/storageService';
+import { 
+  saveRecords, 
+  appendRecords,
+  clearAllLocalRecords,
+  saveAppsScriptUrl, 
+  getSavedAppsScriptUrl, 
+  resetToDemo 
+} from '../services/storageService';
 import { queryAppsScript } from '../services/appsScriptConnector';
 import { updateAdminPassword, revokeAdminSession } from '../services/adminAuthService';
-import { saveRecordsToCloud } from '../services/firestoreService';
+import { 
+  saveRecordsToCloud, 
+  appendRecordsToCloud, 
+  clearAllCertificatesFromCloud 
+} from '../services/firestoreService';
 
 interface DataSourceModalProps {
   isOpen: boolean;
@@ -170,7 +182,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     }
   };
 
-  // Handle Direct Excel Upload (.xlsx)
+  // Handle Direct Excel Upload (.xlsx, .xls) - Appends file-by-file without hanging
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -178,40 +190,94 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
     setIsScanningDrive(true);
-    setScanProgress({ message: 'Đang đọc và phân tích file Excel...', percent: 10 });
 
     try {
-      const allRecords: CertificateRecord[] = [];
-      const loadedFileNames: string[] = [];
+      let totalAddedAllFiles = 0;
+      let lastUploadedCount = 0;
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        setScanProgress({ 
+          message: `Đang đọc file [${file.name}] (${i + 1}/${files.length})...`, 
+          percent: 15 
+        });
+
         const buffer = await file.arrayBuffer();
         const records = parseExcelFile(buffer, file.name);
-        allRecords.push(...records);
-        loadedFileNames.push(file.name);
+
+        if (records.length === 0) {
+          console.warn(`File ${file.name} không tìm thấy bản ghi chứng chỉ nào.`);
+          continue;
+        }
+
+        // 1. Append locally
+        appendRecords(records, 'local_excel', file.name);
+
+        // 2. Append to Cloud Firestore with progress
+        setScanProgress({ 
+          message: `Đang đồng bộ ${records.length} chứng chỉ từ [${file.name}] lên Cloud Firebase...`, 
+          percent: 40 
+        });
+
+        const cloudRes = await appendRecordsToCloud(
+          records,
+          'local_excel',
+          file.name,
+          (msg, pct) => setScanProgress({ message: msg, percent: pct })
+        );
+
+        if (!cloudRes.success) {
+          throw new Error(cloudRes.error || `Lỗi lưu trữ file ${file.name} lên Firebase`);
+        }
+
+        totalAddedAllFiles += records.length;
+        lastUploadedCount = cloudRes.totalInCloud;
       }
 
-      if (allRecords.length === 0) {
-        throw new Error('Không tìm thấy bản ghi chứng chỉ hợp lệ nào trong file Excel được tải lên. Hãy đảm bảo file có cột STT, Mã người học (MSSV), Họ tên, Số hiệu.');
-      }
-
-      // Save locally
-      saveRecords(allRecords, 'local_excel', loadedFileNames);
       onDataUpdated();
 
-      // Save to Cloud Firestore so all other devices, IPs, and browsers have the exact data!
-      setScanProgress({ message: 'Đang lưu trữ lên đám mây Cloud Firestore cho toàn hệ thống...', percent: 25 });
-      await saveRecordsToCloud(
-        allRecords,
-        'local_excel',
-        loadedFileNames,
-        (msg, pct) => setScanProgress({ message: msg, percent: pct })
-      );
+      if (totalAddedAllFiles === 0) {
+        throw new Error('Không tìm thấy bản ghi chứng chỉ hợp lệ nào trong file Excel được tải lên. Hãy kiểm tra các cột Mã người học (MSSV), Họ tên, Số hiệu, Số vào sổ gốc.');
+      }
 
-      setSuccessMsg(`Đã nạp và lưu trữ vĩnh viễn ${allRecords.length} chứng chỉ lên Đám mây (Cloud Firestore)! Bất kỳ ai từ mọi thiết bị, điện thoại hoặc IP khác giờ đây đều có thể tra cứu ngay.`);
+      setSuccessMsg(`Đã nạp và cộng dồn thành công ${totalAddedAllFiles} chứng chỉ vào cơ sở dữ liệu Cloud Firebase (Tổng hệ thống hiện tại: ${lastUploadedCount} chứng chỉ)! Bạn có thể tiếp tục tải thêm các file khác.`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi đọc file Excel';
+      setErrorMsg(msg);
+    } finally {
+      setIsScanningDrive(false);
+      setScanProgress(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Handle Clearing All Certificates on Cloud Firebase
+  const handleClearCloudData = async () => {
+    if (!confirm('XÁC NHẬN XÓA:\n\nBạn có chắc chắn muốn XÓA TOÀN BỘ dữ liệu chứng chỉ đang lưu trên Cloud Firebase?\n\nThao tác này sẽ dọn sạch danh sách chứng chỉ trên máy chủ và đưa hệ thống về 0 bản ghi.')) {
+      return;
+    }
+
+    setIsScanningDrive(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      setScanProgress({ message: 'Đang xóa sạch dữ liệu chứng chỉ trên Cloud Firebase...', percent: 20 });
+      const res = await clearAllCertificatesFromCloud((msg, pct) => {
+        setScanProgress({ message: msg, percent: pct });
+      });
+
+      if (!res.success) {
+        throw new Error(res.error || 'Lỗi khi xóa dữ liệu trên Firebase');
+      }
+
+      clearAllLocalRecords();
+      onDataUpdated();
+      setSuccessMsg('Đã xóa sạch toàn bộ danh sách chứng chỉ trên Cloud Firebase thành công! Hệ thống hiện đã được làm trống.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Lỗi khi xóa dữ liệu';
       setErrorMsg(msg);
     } finally {
       setIsScanningDrive(false);
@@ -556,34 +622,31 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
             <div className="space-y-4">
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-emerald-500/50 hover:border-emerald-600 rounded-2xl p-8 text-center bg-emerald-50/20 hover:bg-emerald-50/40 transition-all cursor-pointer"
+                className="border-2 border-dashed border-emerald-500/50 hover:border-emerald-600 rounded-2xl p-6 sm:p-8 text-center bg-emerald-50/20 hover:bg-emerald-50/40 transition-all cursor-pointer group"
               >
-                <FileSpreadsheet className="w-12 h-12 text-emerald-600 mx-auto mb-3" />
+                <FileSpreadsheet className="w-12 h-12 text-emerald-600 mx-auto mb-3 group-hover:scale-110 transition-transform" />
                 <h4 className="font-bold text-slate-800 text-base mb-1">
-                  Kéo thả hoặc Nhấp để chọn file Excel (.xlsx, .xls)
+                  Nhấp hoặc Kéo thả file Excel (.xlsx, .xls) để thêm dữ liệu
                 </h4>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Hỗ trợ tải lên nhiều file cùng lúc (các đợt cấp phát K46, K47, K48). Dữ liệu được lưu trong bộ nhớ máy cực nhanh.
+                <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                  <strong>Khuyên dùng:</strong> Tải lên từng file một (từng đợt K46, K47, K48...) để hệ thống tự động cộng dồn vào cơ sở dữ liệu Cloud, mượt mà và không lo treo máy khi file có hàng nghìn dòng.
                 </p>
+                <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-700 font-semibold bg-emerald-100/60 px-3 py-1 rounded-lg">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Chọn file Excel từ máy tính</span>
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  multiple
                   accept=".xlsx, .xls"
                   onChange={handleFileUpload}
                   className="hidden"
                 />
               </div>
 
-              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-950 flex items-start gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong>Tự động lưu trữ Đám mây (Cloud Firestore):</strong> Dữ liệu từ file Excel tải lên sẽ được lưu trữ vĩnh viễn trên máy chủ đám mây, giúp <strong>mọi thiết bị, điện thoại và địa chỉ IP khác</strong> đều có thể tra cứu ngay mà không cần tải lại file.
-                </div>
-              </div>
-
+              {/* Progress Bar */}
               {scanProgress && (
-                <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="space-y-1.5 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                   <div className="flex justify-between text-xs text-slate-700 font-medium">
                     <span>{scanProgress.message}</span>
                     <span className="font-mono font-bold text-emerald-600">{scanProgress.percent}%</span>
@@ -597,9 +660,65 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                 </div>
               )}
 
-              <div className="text-xs text-slate-500 space-y-1">
-                <div>• Tự động bỏ qua các dòng tiêu đề trên cùng (đọc dòng 4 trở đi).</div>
-                <div>• Nhận diện tự động cột STT, Mã người học (MSSV), Họ tên, Số hiệu, Số vào sổ gốc, Ngày cấp.</div>
+              {/* Parsing Capabilities Summary */}
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Tính năng nhận diện tự động &amp; Lưu trữ Đám mây:</span>
+                </div>
+                <ul className="text-[11px] text-emerald-800 space-y-1 list-disc pl-5">
+                  <li><strong>Chỉ bỏ 1 dòng tiêu đề:</strong> Dữ liệu được đọc ngay từ dòng tiếp theo mà không bị bỏ sót.</li>
+                  <li><strong>Tự nhận diện linh hoạt các cột:</strong> Mã người học (MSSV), Họ tên (Họ và tên, họ lót và tên...), Số hiệu, Số vào sổ gốc, Ngày cấp (nếu có). Không quy định cố định vị trí cột.</li>
+                  <li><strong>Cộng dồn tự động (Append):</strong> Nạp từng file nối tiếp nhau, dữ liệu được tự động lưu vĩnh viễn lên Cloud Firebase để mọi điện thoại/máy tính khác đều tra cứu tức thì.</li>
+                </ul>
+              </div>
+
+              {/* Current Files & Total Status */}
+              {syncStatus.totalRecords > 0 && (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600 font-medium">Tổng chứng chỉ đang lưu:</span>
+                    <span className="font-mono font-bold text-emerald-700 text-sm">{syncStatus.totalRecords} chứng chỉ</span>
+                  </div>
+                  {syncStatus.fileNames && syncStatus.fileNames.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-slate-200">
+                      <span className="text-[11px] text-slate-500 font-semibold">Các file đã nạp:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {syncStatus.fileNames.map((fn, idx) => (
+                          <span key={idx} className="bg-white text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                            {fn}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* DANGER ZONE: Xóa dữ liệu chứng chỉ trên Firebase */}
+              <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-rose-800 font-bold text-xs">
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                    <span>Quản lý &amp; Xóa dữ liệu trên Cloud Firebase</span>
+                  </div>
+                  <span className="text-[10px] text-rose-600 font-semibold bg-rose-100/80 px-2 py-0.5 rounded-full">
+                    Khu vực quản trị
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Khi cần làm mới hoàn toàn cơ sở dữ liệu hoặc xóa toàn bộ chứng chỉ cũ đã lưu trên máy chủ Firebase trước khi tải lên các file đợt mới, nhấn nút bên dưới:
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClearCloudData}
+                  disabled={isScanningDrive}
+                  className="flex items-center space-x-2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-3.5 rounded-xl shadow-xs text-xs transition-all cursor-pointer disabled:opacity-50"
+                  title="Xóa toàn bộ danh sách chứng chỉ trên máy chủ Cloud Firebase"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa toàn bộ dữ liệu chứng chỉ trên Cloud Firebase</span>
+                </button>
               </div>
             </div>
           )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Volume2, VolumeX, Copy, Check, Sparkles, Megaphone, Calendar, Hash, Award } from 'lucide-react';
+import { Volume2, VolumeX, Copy, Check, Megaphone, Hash, Award, Shield, User } from 'lucide-react';
 import { CertificateRecord } from '../types/certificate';
 
 interface HighlightedResultCardProps {
@@ -11,7 +11,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const handleCopy = () => {
-    const textToCopy = `STT: ${record.stt} - Số vào sổ gốc: ${record.soVaoSoGoc} - MSSV: ${record.mssv} (${record.hoVaTen})`;
+    const textToCopy = `Số vào sổ gốc: ${record.soVaoSoGoc} - Số hiệu: ${record.soHieuChungChi} - STT: ${record.stt} - MSSV: ${record.mssv} (${record.hoVaTen})`;
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -30,7 +30,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
     }
 
     // Prepare speech text in Vietnamese
-    const speechText = `Số thứ tự ${record.stt}. Số vào sổ gốc ${record.soVaoSoGoc}. Sinh viên ${record.hoVaTen}.`;
+    const speechText = `Số vào sổ gốc ${record.soVaoSoGoc}. Số hiệu chứng chỉ ${record.soHieuChungChi}. Sinh viên ${record.hoVaTen}. Số thứ tự ${record.stt}.`;
     const utterance = new SpeechSynthesisUtterance(speechText);
     utterance.lang = 'vi-VN';
     utterance.rate = 0.9; // clear, steady pace
@@ -72,7 +72,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
                   ? 'bg-amber-500 text-slate-950 border-amber-400 animate-pulse'
                   : 'bg-slate-800/80 hover:bg-slate-800 text-amber-300 border-amber-500/30'
               }`}
-              title="Nhấn để đọc to số thứ tự và số vào sổ gốc cho cán bộ nghe"
+              title="Nhấn để đọc to số vào sổ gốc và số hiệu cho cán bộ nghe"
             >
               {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               <span>{isSpeaking ? 'Đang đọc...' : 'Đọc to 🔊'}</span>
@@ -81,7 +81,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
             <button
               onClick={handleCopy}
               className="flex items-center space-x-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
-              title="Sao chép nhanh STT và Số vào sổ gốc"
+              title="Sao chép nhanh Số vào sổ gốc và Số hiệu chứng chỉ"
             >
               {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
@@ -89,51 +89,51 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
           </div>
         </div>
 
-        {/* EXTRA LARGE HIGHLIGHT CARDS: STT AND NGÀY CẤP */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6">
-          {/* SỐ THỨ TỰ (STT) - DOMINANT CARD */}
-          <div className="md:col-span-7 relative overflow-hidden bg-gradient-to-br from-amber-500/15 via-amber-600/5 to-slate-900 rounded-2xl p-5 sm:p-6 border-2 border-amber-400/50 shadow-inner group">
+        {/* 02 EXTRA LARGE HIGHLIGHT CARDS: SỐ VÀO SỔ GỐC & SỐ HIỆU CHỨNG CHỈ */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+          {/* CARD 1: SỐ VÀO SỔ GỐC */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-amber-500/15 via-amber-600/5 to-slate-900 rounded-2xl p-5 sm:p-6 border-2 border-amber-400/50 shadow-inner group">
             <div className="flex items-center justify-between text-amber-300/80 mb-2">
               <span className="flex items-center space-x-1.5 text-xs sm:text-sm font-bold uppercase tracking-wider">
-                <Hash className="w-4 h-4 text-amber-400" />
-                <span>SỐ THỨ TỰ (STT)</span>
+                <Award className="w-4 h-4 text-amber-400" />
+                <span>SỐ VÀO SỔ GỐC</span>
               </span>
-              <span className="text-[10px] font-bold text-amber-400 bg-amber-400/15 border border-amber-400/30 px-2 py-0.5 rounded-full uppercase">
+              <span className="text-[10px] font-bold text-amber-400 bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 rounded-full uppercase">
                 Ưu tiên số 1
               </span>
             </div>
 
-            <div className="flex items-baseline space-x-3 my-1">
-              <span className="font-mono text-6xl sm:text-7xl md:text-8xl font-black text-amber-300 tracking-tight drop-shadow-md">
-                {record.stt}
+            <div className="my-2">
+              <span className="font-mono text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-amber-300 tracking-tight drop-shadow-md block break-all leading-tight">
+                {record.soVaoSoGoc}
               </span>
             </div>
 
             <p className="text-xs sm:text-sm text-slate-300 mt-2 font-medium">
-              Vị trí sắp xếp phôi bằng trong hồ sơ lưu trữ
+              Số vào sổ gốc cấp chứng chỉ GDQP&amp;AN
             </p>
           </div>
 
-          {/* NGÀY CẤP - COMPLEMENTARY HIGHLIGHT CARD */}
-          <div className="md:col-span-5 relative overflow-hidden bg-gradient-to-br from-emerald-500/15 via-emerald-600/5 to-slate-900 rounded-2xl p-5 sm:p-6 border-2 border-emerald-400/50 shadow-inner">
+          {/* CARD 2: SỐ HIỆU CHỨNG CHỈ */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500/15 via-emerald-600/5 to-slate-900 rounded-2xl p-5 sm:p-6 border-2 border-emerald-400/50 shadow-inner">
             <div className="flex items-center justify-between text-emerald-300/80 mb-2">
               <span className="flex items-center space-x-1.5 text-xs sm:text-sm font-bold uppercase tracking-wider">
-                <Calendar className="w-4 h-4 text-emerald-400" />
-                <span>NGÀY CẤP</span>
+                <Shield className="w-4 h-4 text-emerald-400" />
+                <span>SỐ HIỆU CHỨNG CHỈ</span>
               </span>
-              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/15 border border-emerald-400/30 px-2 py-0.5 rounded-full uppercase">
-                Đợt cấp
+              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/15 border border-emerald-400/30 px-2.5 py-0.5 rounded-full uppercase">
+                Số văn bằng
               </span>
             </div>
 
-            <div className="my-1">
-              <span className="font-mono text-3xl sm:text-4xl md:text-5xl font-black text-emerald-300 tracking-tight drop-shadow-md block">
-                {record.ngayCap}
+            <div className="my-2">
+              <span className="font-mono text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-emerald-300 tracking-tight drop-shadow-md block break-all leading-tight">
+                {record.soHieuChungChi}
               </span>
             </div>
 
             <p className="text-xs sm:text-sm text-slate-300 mt-2 font-medium">
-              Ngày ký ban hành và đóng dấu chứng chỉ
+              Số phôi văn bằng in trực tiếp trên chứng chỉ
             </p>
           </div>
         </div>
@@ -148,9 +148,17 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
             </span>
           </div>
 
-          <div className="flex items-center space-x-2 text-slate-400">
-            <span>Số vào sổ gốc:</span>
-            <strong className="text-emerald-300 font-mono font-bold">{record.soVaoSoGoc}</strong>
+          <div className="flex items-center space-x-3 text-slate-400">
+            {record.stt && (
+              <div>
+                <span>STT:</span> <strong className="text-amber-300 font-mono font-bold">{record.stt}</strong>
+              </div>
+            )}
+            {record.ngayCap && (
+              <div>
+                <span>• Ngày cấp:</span> <strong className="text-emerald-300 font-mono font-bold">{record.ngayCap}</strong>
+              </div>
+            )}
           </div>
         </div>
       </div>

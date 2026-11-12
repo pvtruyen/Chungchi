@@ -8,7 +8,7 @@ export function normalizeHeader(str: unknown): string {
   if (str === null || str === undefined) return '';
   return String(str)
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // remove all accent diacritics (including đ/đệm/đêm -> d/dem)
+    .replace(/[\u0300-\u036f]/g, '') // remove all accent diacritics
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D')
     .toLowerCase()
@@ -67,7 +67,6 @@ function isLikelyFirstName(val: string): boolean {
   const nonNames = ['nam', 'nu', 'nữ', 'dat', 'đạt', 'gioi', 'giỏi', 'kha', 'khá', 'tb', 'khong', 'không'];
   if (nonNames.includes(lower)) return false;
 
-  // Must contain alphabetic characters
   return /[a-zA-ZàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđĐ]/i.test(s);
 }
 
@@ -125,7 +124,8 @@ function findStudentNameInRow(
 
 /**
  * Parse an Excel file (ArrayBuffer / Uint8Array) into normalized Certificate records.
- * Automatically skips header/instruction lines (starts actual data from row 4 or header inspection).
+ * Automatically identifies columns dynamically without relying on fixed column positions.
+ * Only skips 1 header line (never skips 4 lines arbitrarily).
  */
 export function parseExcelFile(
   data: ArrayBuffer | Uint8Array,
@@ -151,15 +151,17 @@ export function parseExcelFile(
 
     if (rows.length === 0) continue;
 
-    // Detect header across first 12 rows (supporting merged / multi-row headers)
+    // Detect header across first 8 rows (find row with highest match count)
     const colMap: Record<string, number> = {};
     let detectedHeaderRow = -1;
+    let maxMatchesInHeader = 0;
 
-    for (let r = 0; r < Math.min(12, rows.length); r++) {
+    for (let r = 0; r < Math.min(8, rows.length); r++) {
       const row = rows[r];
       if (!Array.isArray(row)) continue;
 
       let rowMatches = 0;
+      const currentMap: Record<string, number> = {};
 
       row.forEach((cell, colIdx) => {
         const norm = normalizeHeader(cell);
@@ -167,7 +169,7 @@ export function parseExcelFile(
 
         // 1. STT
         if (norm === 'stt' || norm === 'so thu tu' || norm === 'tt' || norm === 'no' || norm.startsWith('stt')) {
-          if (colMap.stt === undefined) { colMap.stt = colIdx; rowMatches++; }
+          if (currentMap.stt === undefined) { currentMap.stt = colIdx; rowMatches++; }
         }
         // 2. MSSV (Mã người học / Mã sinh viên)
         else if (
@@ -180,14 +182,16 @@ export function parseExcelFile(
           norm.includes('mssv') ||
           (norm.includes('ma') && (norm.includes('sinh vien') || norm.includes('nguoi hoc') || norm.includes('hoc vien') || norm.includes('sv')))
         ) {
-          if (colMap.mssv === undefined) { colMap.mssv = colIdx; rowMatches++; }
+          if (currentMap.mssv === undefined) { currentMap.mssv = colIdx; rowMatches++; }
         }
-        // 3. Họ và tên đầy đủ trong 1 cột (e.g. "Họ, chữ đệm và tên", "Họ, chữ đêm va tên", "Họ và tên", "Họ tên")
+        // 3. Họ và tên đầy đủ trong 1 cột (Họ và tên người học, Họ tên, Họ lót và tên, Họ, chữ đệm và tên...)
         else if (
           norm === 'ho chu dem va ten' ||
           norm === 'ho chu dem ten' ||
           norm === 'ho va ten' ||
           norm === 'ho ten' ||
+          norm === 'ho lot va ten' ||
+          norm === 'ho lot ten' ||
           norm === 'ho va ten nguoi hoc' ||
           norm === 'ho ten nguoi hoc' ||
           norm === 'ho ten sinh vien' ||
@@ -196,11 +200,11 @@ export function parseExcelFile(
           norm === 'ho va chu dem va ten' ||
           (norm.includes('ho') && norm.includes('ten')) ||
           (norm.includes('chu dem') && norm.includes('ten')) ||
-          (norm.includes('ho') && norm.includes('dem') && norm.includes('ten'))
+          (norm.includes('ho') && norm.includes('lot') && norm.includes('ten'))
         ) {
-          if (colMap.hoVaTen === undefined) { colMap.hoVaTen = colIdx; rowMatches++; }
+          if (currentMap.hoVaTen === undefined) { currentMap.hoVaTen = colIdx; rowMatches++; }
         }
-        // 4. Họ và chữ đệm (tách 2 cột)
+        // 4. Họ và chữ đệm / Họ lót (tách 2 cột)
         else if (
           norm === 'ho chu dem' ||
           norm === 'ho va chu dem' ||
@@ -210,10 +214,11 @@ export function parseExcelFile(
           norm.startsWith('ho chu dem') ||
           norm.startsWith('ho va chu dem') ||
           norm.startsWith('ho dem') ||
+          norm.startsWith('ho lot') ||
           (norm.includes('chu dem') && !norm.includes('ten')) ||
-          (norm.includes('ho') && !norm.includes('ten') && !norm.includes('ngay sinh') && !norm.includes('so'))
+          ((norm.includes('ho') || norm.includes('lot')) && !norm.includes('ten') && !norm.includes('ngay sinh') && !norm.includes('so'))
         ) {
-          if (colMap.hoDem === undefined) { colMap.hoDem = colIdx; rowMatches++; }
+          if (currentMap.hoDem === undefined) { currentMap.hoDem = colIdx; rowMatches++; }
         }
         // 5. Tên sinh viên (tách 2 cột)
         else if (
@@ -223,37 +228,38 @@ export function parseExcelFile(
           norm === 'ten hoc vien' ||
           norm === 'ten sv'
         ) {
-          if (colMap.ten === undefined) { colMap.ten = colIdx; rowMatches++; }
+          if (currentMap.ten === undefined) { currentMap.ten = colIdx; rowMatches++; }
         }
         // 6. Số hiệu chứng chỉ / Số văn bằng
         else if (norm.includes('so hieu') || norm.includes('so van bang') || norm.includes('so vb')) {
-          if (colMap.soHieu === undefined) { colMap.soHieu = colIdx; rowMatches++; }
+          if (currentMap.soHieu === undefined) { currentMap.soHieu = colIdx; rowMatches++; }
         }
-        // 7. Số vào sổ gốc / Số quản lý (hỗ trợ cả "Sốvào sổ" dính chữ)
+        // 7. Số vào sổ gốc / Số quản lý (hỗ trợ "Số vào sổ gốc cấp chứng chỉ", "Sốvào sổ", "Số vào sổ")
         else if (
           norm.includes('so vao so') ||
           norm.includes('sovao so') ||
           norm.includes('so vaoso') ||
           norm.includes('sovaoso') ||
           norm.includes('so quan ly') ||
-          norm.includes('so goc')
+          norm.includes('so goc') ||
+          norm.includes('vao so')
         ) {
-          if (colMap.soVaoSo === undefined) { colMap.soVaoSo = colIdx; rowMatches++; }
+          if (currentMap.soVaoSo === undefined) { currentMap.soVaoSo = colIdx; rowMatches++; }
         }
-        // 8. Ngày sinh (hỗ trợ cả "Ngày tháng\n năm sinh")
+        // 8. Ngày sinh / Ngày tháng năm sinh
         else if (
           norm.includes('ngay sinh') ||
           norm.includes('ngay thang nam sinh') ||
           norm.includes('nam sinh') ||
           norm === 'ns'
         ) {
-          if (colMap.ngaySinh === undefined) { colMap.ngaySinh = colIdx; rowMatches++; }
+          if (currentMap.ngaySinh === undefined) { currentMap.ngaySinh = colIdx; rowMatches++; }
         }
         // 9. Giới tính
         else if (norm.includes('gioi tinh') || norm === 'phai' || norm === 'gt') {
-          if (colMap.gioiTinh === undefined) { colMap.gioiTinh = colIdx; rowMatches++; }
+          if (currentMap.gioiTinh === undefined) { currentMap.gioiTinh = colIdx; rowMatches++; }
         }
-        // 10. Ngày cấp chứng chỉ / ngày tháng cấp văn bằng
+        // 10. Ngày cấp chứng chỉ
         else if (
           norm.includes('ngay cap') ||
           norm.includes('ngay thang cap') ||
@@ -263,7 +269,7 @@ export function parseExcelFile(
           norm.includes('ngay cap van bang') ||
           norm.includes('ngay cap chung chi')
         ) {
-          if (colMap.ngayCap === undefined) { colMap.ngayCap = colIdx; rowMatches++; }
+          if (currentMap.ngayCap === undefined) { currentMap.ngayCap = colIdx; rowMatches++; }
         }
         // 11. Đợt học / Đợt cấp / Khóa học
         else if (
@@ -272,53 +278,63 @@ export function parseExcelFile(
           norm.includes('dot thi') ||
           norm.includes('dot') ||
           norm.includes('khoa hoc') ||
-          norm.includes('hoc ky')
+          norm.includes('hoc ky') ||
+          norm.includes('nganh dao tao')
         ) {
-          if (colMap.dotHoc === undefined) { colMap.dotHoc = colIdx; rowMatches++; }
+          if (currentMap.dotHoc === undefined) { currentMap.dotHoc = colIdx; rowMatches++; }
         }
         // 12. Tên chứng chỉ
         else if (norm.includes('ten chung chi') || norm.includes('loai chung chi') || norm.includes('ten van bang')) {
-          if (colMap.tenChungChi === undefined) { colMap.tenChungChi = colIdx; rowMatches++; }
+          if (currentMap.tenChungChi === undefined) { currentMap.tenChungChi = colIdx; rowMatches++; }
         }
         // 13. Đơn vị cấp
         else if (norm.includes('don vi cap') || norm.includes('co so dao tao') || norm.includes('truong')) {
-          if (colMap.donViCap === undefined) { colMap.donViCap = colIdx; rowMatches++; }
+          if (currentMap.donViCap === undefined) { currentMap.donViCap = colIdx; rowMatches++; }
         }
         // 14. Xếp loại / Điểm thi
         else if (norm.includes('xep loai') || norm.includes('ket qua') || norm.includes('diem thi')) {
-          if (colMap.xepLoai === undefined) { colMap.xepLoai = colIdx; rowMatches++; }
+          if (currentMap.xepLoai === undefined) { currentMap.xepLoai = colIdx; rowMatches++; }
         }
       });
 
-      if (rowMatches >= 2) {
-        detectedHeaderRow = Math.max(detectedHeaderRow, r);
+      // Merge into master colMap
+      Object.entries(currentMap).forEach(([k, v]) => {
+        if (colMap[k] === undefined) {
+          colMap[k] = v;
+        }
+      });
+
+      if (rowMatches > maxMatchesInHeader) {
+        maxMatchesInHeader = rowMatches;
+        detectedHeaderRow = r;
       }
     }
 
-    // Determine actual data start row
-    let dataStartRow = detectedHeaderRow !== -1 ? detectedHeaderRow + 1 : 3;
+    // Determine dataStartRow:
+    // Only skips 1 header line! If detected at row r, start at r + 1. If not detected, start at row 1 (skip row 0 only).
+    let dataStartRow = detectedHeaderRow !== -1 ? detectedHeaderRow + 1 : 1;
 
-    // Scan forward to ensure dataStartRow skips any sub-header numbers like (1), (2), (3)
-    for (let r = dataStartRow; r < Math.min(dataStartRow + 4, rows.length); r++) {
-      const row = rows[r];
-      if (!Array.isArray(row)) continue;
-      // If row only has parenthesized numbers or is empty, advance
-      const firstCell = String(row[0] || '').trim();
-      if (/^\(\d+\)$/.test(firstCell) || /^col/i.test(firstCell)) {
-        dataStartRow = r + 1;
+    // Safety: if the row at dataStartRow contains no real data or only column indexes (1), (2), advance by 1
+    if (dataStartRow < rows.length) {
+      const firstRow = rows[dataStartRow];
+      if (Array.isArray(firstRow)) {
+        const joined = firstRow.map(c => String(c || '').trim()).join('');
+        if (/^\(\d+\)+$/.test(joined) || joined.length === 0) {
+          dataStartRow += 1;
+        }
       }
     }
 
-    const getVal = (row: unknown[], key: string, fallbackIdx: number): string => {
-      const idx = colMap[key] !== undefined ? colMap[key] : fallbackIdx;
+    const getVal = (row: unknown[], key: string): string => {
+      const idx = colMap[key];
       if (idx !== undefined && idx >= 0 && row[idx] !== undefined && row[idx] !== null) {
         return String(row[idx]).trim();
       }
       return '';
     };
 
-    const getDateVal = (row: unknown[], key: string, fallbackIdx: number): string => {
-      const idx = colMap[key] !== undefined ? colMap[key] : fallbackIdx;
+    const getDateVal = (row: unknown[], key: string): string => {
+      const idx = colMap[key];
       if (idx !== undefined && idx >= 0 && row[idx] !== undefined && row[idx] !== null) {
         return formatExcelDate(row[idx]);
       }
@@ -329,8 +345,8 @@ export function parseExcelFile(
       const row = rows[r];
       if (!Array.isArray(row) || row.length === 0) continue;
 
-      // 1. Extract MSSV
-      let mssv = getVal(row, 'mssv', -1);
+      // 1. Dynamic MSSV extraction
+      let mssv = getVal(row, 'mssv');
       // If not mapped or empty, scan row for student code pattern (e.g. B2101234, 2110291, etc.)
       if (!mssv) {
         for (let c = 0; c < row.length; c++) {
@@ -343,31 +359,32 @@ export function parseExcelFile(
         }
       }
 
-      if (!mssv) continue; // Skip non-student rows
+      // If still no MSSV, check if any cell contains an alphanumeric ID
+      if (!mssv) continue; // Skip non-student row
 
       const cleanMssv = mssv.trim().toUpperCase();
 
-      // 2. STT
-      const sttRaw = getVal(row, 'stt', 0);
-      const stt = sttRaw ? (isNaN(Number(sttRaw)) ? sttRaw : Number(sttRaw)) : r - dataStartRow + 1;
+      // 2. STT (if file has no STT column, use sequential number)
+      const sttRaw = getVal(row, 'stt');
+      const stt = sttRaw ? (isNaN(Number(sttRaw)) ? sttRaw : Number(sttRaw)) : (r - dataStartRow + 1);
 
-      // 3. Resolve Student Full Name (Họ, chữ đệm và tên)
+      // 3. Dynamic Student Name extraction (Họ và tên / Họ lót và tên)
       let hoVaTen = '';
 
-      // Mode A: Split columns: Họ và chữ đệm + Tên
+      // Mode A: Split columns (Họ và chữ đệm + Tên)
       if (colMap.hoDem !== undefined && colMap.ten !== undefined) {
-        const hoDem = getVal(row, 'hoDem', -1);
-        const ten = getVal(row, 'ten', -1);
+        const hoDem = getVal(row, 'hoDem');
+        const ten = getVal(row, 'ten');
         if (hoDem || ten) {
           hoVaTen = `${hoDem} ${ten}`.trim();
         }
       }
 
-      // Mode B: Single column "Họ, chữ đệm và tên" / "Họ, chữ đêm va tên" / "Họ và tên"
+      // Mode B: Single column "Họ và tên người học" / "Họ và tên" / "Họ lót và tên"
       if (!hoVaTen && colMap.hoVaTen !== undefined) {
-        const nameVal = getVal(row, 'hoVaTen', -1);
+        const nameVal = getVal(row, 'hoVaTen');
         if (nameVal) {
-          // Check if adjacent column is the first name (e.g. table had merged header spanning 2 cols)
+          // If table had merged column or next column is first name
           const nextColIdx = colMap.hoVaTen + 1;
           if (nextColIdx < row.length && colMap.ten === undefined) {
             const nextVal = String(row[nextColIdx] || '').trim();
@@ -382,34 +399,64 @@ export function parseExcelFile(
         }
       }
 
-      // Mode C: Deep Row Inspection (scans row for student name text, combining split cells if needed)
+      // Mode C: Automatic Row Scanning for student name
       if (!hoVaTen) {
         hoVaTen = findStudentNameInRow(row, cleanMssv, colMap);
       }
 
-      // Mode D: Final fallback to cleanMssv label instead of generic placeholder
       if (!hoVaTen || hoVaTen.trim() === '') {
         hoVaTen = `Sinh viên ${cleanMssv}`;
       }
 
-      // 4. Số hiệu & Số vào sổ
-      const soHieu = getVal(row, 'soHieu', 6) || `QP-${cleanMssv}`;
-      const soVaoSo = getVal(row, 'soVaoSo', 7) || `${stt}/GDQP`;
-      const ngaySinh = getDateVal(row, 'ngaySinh', 2);
-      const gioiTinh = getVal(row, 'gioiTinh', 3) || 'Nam';
-
-      // 5. Ngày cấp chứng chỉ: lấy cột ngày tháng cấp văn bằng, nếu không có thì lấy đợt học
-      let ngayCap = getDateVal(row, 'ngayCap', 8);
-      if (!ngayCap || ngayCap.trim() === '') {
-        const dotHoc = getVal(row, 'dotHoc', 10);
-        const khoaHoc = getVal(row, 'khoaHoc', 10);
-        ngayCap = dotHoc || khoaHoc || '15/10/2025';
+      // 4. Dynamic Số hiệu chứng chỉ
+      let soHieu = getVal(row, 'soHieu');
+      if (!soHieu) {
+        // Look for cell matching certificate code pattern (e.g. C123456 or QPAN-...)
+        for (let c = 0; c < row.length; c++) {
+          if (c === colMap.mssv || c === colMap.stt || c === colMap.hoVaTen) continue;
+          const val = String(row[c] || '').trim();
+          if (/^[a-zA-Z]{1,2}\d{5,8}$/i.test(val) && val.toUpperCase() !== cleanMssv) {
+            soHieu = val;
+            break;
+          }
+        }
+      }
+      if (!soHieu) {
+        soHieu = `QP-${cleanMssv}`;
       }
 
-      const tenChungChi = getVal(row, 'tenChungChi', 4) || 'Chứng chỉ Giáo dục Quốc phòng và An ninh';
-      const donViCap = getVal(row, 'donViCap', 9) || 'Trung tâm GDQP&AN - Đại học Cần Thơ';
-      const khoaHoc = getVal(row, 'khoaHoc', 10) || getVal(row, 'dotHoc', 10) || '';
-      const xepLoai = getVal(row, 'xepLoai', 11) || '';
+      // 5. Dynamic Số vào sổ gốc
+      let soVaoSo = getVal(row, 'soVaoSo');
+      if (!soVaoSo) {
+        // Look for cell matching so vao so pattern (e.g. 142/2025/GDQP or 142/GDQP or number)
+        for (let c = 0; c < row.length; c++) {
+          if (c === colMap.mssv || c === colMap.stt || c === colMap.hoVaTen || c === colMap.soHieu) continue;
+          const val = String(row[c] || '').trim();
+          if (/\d+\/\d+/.test(val) || /\d+\/[a-zA-Z]+/.test(val)) {
+            soVaoSo = val;
+            break;
+          }
+        }
+      }
+      if (!soVaoSo) {
+        soVaoSo = `${stt}/GDQP`;
+      }
+
+      // 6. Dynamic Ngày sinh & Giới tính
+      const ngaySinh = getDateVal(row, 'ngaySinh');
+      const gioiTinh = getVal(row, 'gioiTinh') || 'Nam';
+
+      // 7. Dynamic Ngày cấp (có thể không có)
+      let ngayCap = getDateVal(row, 'ngayCap');
+      if (!ngayCap || ngayCap.trim() === '') {
+        const dotHoc = getVal(row, 'dotHoc');
+        ngayCap = dotHoc || '';
+      }
+
+      const tenChungChi = getVal(row, 'tenChungChi') || 'Chứng chỉ Giáo dục Quốc phòng và An ninh';
+      const donViCap = getVal(row, 'donViCap') || 'Trung tâm GDQP&AN - Đại học Cần Thơ';
+      const khoaHoc = getVal(row, 'dotHoc') || '';
+      const xepLoai = getVal(row, 'xepLoai') || '';
 
       records.push({
         id: `${cleanMssv}_${soHieu}_${r}`,
