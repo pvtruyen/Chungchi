@@ -94,10 +94,13 @@ export function saveRecords(
     }
   }
 
+  // Only store up to 1,500 records in LocalStorage as lightweight offline cache
+  // Prevents browser thread freeze when handling 50,000 - 100,000 records
   try {
-    localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
-  } catch (e) {
-    console.warn('Không thể lưu toàn bộ vào LocalStorage (vượt quota):', e);
+    const cacheSubset = records.slice(0, 1500);
+    localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(cacheSubset));
+  } catch {
+    // Graceful fallback: Cloud Firestore is the persistent source of truth
   }
 
   saveSyncStatus({
@@ -136,11 +139,17 @@ export function appendRecords(
     }
   }
 
-  const allRecords = Array.from(recordsIndex.values());
+  // Safely update lightweight LocalStorage cache without freezing UI
   try {
-    localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(allRecords));
-  } catch (e) {
-    console.warn('Không thể lưu toàn bộ vào LocalStorage (vượt quota):', e);
+    if (recordsIndex.size <= 1500) {
+      const allRecords = Array.from(recordsIndex.values());
+      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(allRecords));
+    } else {
+      const recentSubset = Array.from(recordsIndex.values()).slice(-1500);
+      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(recentSubset));
+    }
+  } catch {
+    // Quota reached, safe to ignore since Cloud Firestore holds the 100k database
   }
 
   const currentStatus = getSyncStatus();

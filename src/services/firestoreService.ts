@@ -72,8 +72,56 @@ export async function fetchCloudSyncStatus(): Promise<SyncStatus | null> {
 }
 
 /**
+ * Efficiently commit multiple Firestore batches in parallel with a concurrency pool.
+ * Yields execution to the browser thread between batches so the UI stays responsive and never freezes.
+ */
+async function commitBatchesWithConcurrency(
+  records: CertificateRecord[],
+  prefixMessage: string,
+  onProgress?: (message: string, percent: number) => void
+): Promise<number> {
+  const BATCH_SIZE = 450;
+  const CONCURRENCY = 4; // Commit 4 batches simultaneously for 4x speedup
+  const total = records.length;
+
+  const batches: { batch: ReturnType<typeof writeBatch>; count: number }[] = [];
+  for (let i = 0; i < total; i += BATCH_SIZE) {
+    const chunk = records.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    for (const record of chunk) {
+      if (!record.mssv) continue;
+      const cleanMssv = record.mssv.trim().toUpperCase();
+      const docRef = doc(db, COLLECTION_CERTIFICATES, cleanMssv);
+      batch.set(docRef, {
+        ...record,
+        mssv: cleanMssv,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
+    batches.push({ batch, count: chunk.length });
+  }
+
+  let uploaded = 0;
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const group = batches.slice(i, i + CONCURRENCY);
+    await Promise.all(group.map(g => g.batch.commit()));
+    uploaded += group.reduce((sum, g) => sum + g.count, 0);
+
+    const pct = Math.min(95, Math.round((uploaded / total) * 90));
+    if (onProgress) {
+      onProgress(`${prefixMessage}: ${uploaded.toLocaleString('vi-VN')}/${total.toLocaleString('vi-VN')} chứng chỉ...`, pct);
+    }
+    // Yield to browser event loop to keep UI smooth and prevent freeze
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  return uploaded;
+}
+
+/**
  * Save an array of certificate records to Cloud Firestore
- * Uses batch writes (450 items per batch) to efficiently store large Excel sheets
+ * Uses parallel batch writes (4 batches at a time) to efficiently store large datasets
  */
 export async function saveRecordsToCloud(
   records: CertificateRecord[],
@@ -87,32 +135,11 @@ export async function saveRecordsToCloud(
 
   try {
     const total = records.length;
-    const BATCH_SIZE = 450;
-    let uploaded = 0;
-
-    for (let i = 0; i < total; i += BATCH_SIZE) {
-      const chunk = records.slice(i, i + BATCH_SIZE);
-      const batch = writeBatch(db);
-
-      for (const record of chunk) {
-        if (!record.mssv) continue;
-        const cleanMssv = record.mssv.trim().toUpperCase();
-        const docRef = doc(db, COLLECTION_CERTIFICATES, cleanMssv);
-        batch.set(docRef, {
-          ...record,
-          mssv: cleanMssv,
-          updatedAt: new Date().toISOString(),
-        }, { merge: true });
-      }
-
-      await batch.commit();
-      uploaded += chunk.length;
-
-      const pct = Math.min(95, Math.round((uploaded / total) * 90));
-      if (onProgress) {
-        onProgress(`Đang lưu lên đám mây: ${uploaded}/${total} chứng chỉ...`, pct);
-      }
-    }
+    const uploaded = await commitBatchesWithConcurrency(
+      records,
+      'Đang lưu lên đám mây',
+      onProgress
+    );
 
     // Save global sync status metadata to Firestore
     const statusData: SyncStatus = {
@@ -126,7 +153,7 @@ export async function saveRecordsToCloud(
     await setDoc(doc(db, COLLECTION_META, DOC_STATUS), statusData, { merge: true });
 
     if (onProgress) {
-      onProgress(`Đã lưu trữ vĩnh viễn ${uploaded} chứng chỉ lên đám mây!`, 100);
+      onProgress(`Đã lưu trữ vĩnh viễn ${uploaded.toLocaleString('vi-VN')} chứng chỉ lên đám mây!`, 100);
     }
 
     return { success: true, totalUploaded: uploaded };
@@ -152,33 +179,11 @@ export async function appendRecordsToCloud(
   }
 
   try {
-    const total = records.length;
-    const BATCH_SIZE = 450;
-    let uploaded = 0;
-
-    for (let i = 0; i < total; i += BATCH_SIZE) {
-      const chunk = records.slice(i, i + BATCH_SIZE);
-      const batch = writeBatch(db);
-
-      for (const record of chunk) {
-        if (!record.mssv) continue;
-        const cleanMssv = record.mssv.trim().toUpperCase();
-        const docRef = doc(db, COLLECTION_CERTIFICATES, cleanMssv);
-        batch.set(docRef, {
-          ...record,
-          mssv: cleanMssv,
-          updatedAt: new Date().toISOString(),
-        }, { merge: true });
-      }
-
-      await batch.commit();
-      uploaded += chunk.length;
-
-      const pct = Math.min(95, Math.round((uploaded / total) * 90));
-      if (onProgress) {
-        onProgress(`Đang nạp file [${fileName}]: ${uploaded}/${total} chứng chỉ...`, pct);
-      }
-    }
+    const uploaded = await commitBatchesWithConcurrency(
+      records,
+      `Đang nạp file [${fileName}]`,
+      onProgress
+    );
 
     // Fetch existing metadata to append file name and update count
     const existingMeta = await fetchCloudSyncStatus();
