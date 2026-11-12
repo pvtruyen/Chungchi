@@ -56,7 +56,7 @@ export const SearchHero: React.FC<SearchHeroProps> = ({
           Tra Cứu Thông Tin Cấp Phát Chứng Chỉ GDQP&amp;AN
         </h2>
         <p className="text-slate-300 text-xs sm:text-sm md:text-base max-w-2xl mx-auto mb-6 leading-relaxed">
-          Nhập <strong className="text-amber-300 font-bold">Mã số sinh viên (MSSV)</strong> để nhận ngay <strong className="text-emerald-300 font-bold">Số thứ tự (STT)</strong> và <strong className="text-emerald-300 font-bold">Ngày cấp</strong> để đọc cho cán bộ quản lý rút bằng nhanh chóng.
+          Nhập <strong className="text-amber-300 font-bold">Mã số sinh viên (MSSV)</strong> để nhận ngay <strong className="text-emerald-300 font-bold">Số thứ tự (STT)</strong> và <strong className="text-emerald-300 font-bold">Số vào sổ gốc</strong> để đọc cho cán bộ quản lý rút bằng nhanh chóng.
         </p>
 
         {/* Search Input Box */}

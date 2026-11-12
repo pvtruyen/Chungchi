@@ -229,12 +229,24 @@ export function parseExcelFile(
         else if (norm.includes('so hieu') || norm.includes('so van bang') || norm.includes('so vb')) {
           if (colMap.soHieu === undefined) { colMap.soHieu = colIdx; rowMatches++; }
         }
-        // 7. Số vào sổ gốc / Số quản lý
-        else if (norm.includes('so vao so') || norm.includes('so quan ly') || norm.includes('so goc')) {
+        // 7. Số vào sổ gốc / Số quản lý (hỗ trợ cả "Sốvào sổ" dính chữ)
+        else if (
+          norm.includes('so vao so') ||
+          norm.includes('sovao so') ||
+          norm.includes('so vaoso') ||
+          norm.includes('sovaoso') ||
+          norm.includes('so quan ly') ||
+          norm.includes('so goc')
+        ) {
           if (colMap.soVaoSo === undefined) { colMap.soVaoSo = colIdx; rowMatches++; }
         }
-        // 8. Ngày sinh
-        else if (norm.includes('ngay sinh') || norm.includes('nam sinh') || norm === 'ns') {
+        // 8. Ngày sinh (hỗ trợ cả "Ngày tháng\n năm sinh")
+        else if (
+          norm.includes('ngay sinh') ||
+          norm.includes('ngay thang nam sinh') ||
+          norm.includes('nam sinh') ||
+          norm === 'ns'
+        ) {
           if (colMap.ngaySinh === undefined) { colMap.ngaySinh = colIdx; rowMatches++; }
         }
         // 9. Giới tính
@@ -271,6 +283,10 @@ export function parseExcelFile(
         // 13. Đơn vị cấp
         else if (norm.includes('don vi cap') || norm.includes('co so dao tao') || norm.includes('truong')) {
           if (colMap.donViCap === undefined) { colMap.donViCap = colIdx; rowMatches++; }
+        }
+        // 14. Xếp loại / Điểm thi
+        else if (norm.includes('xep loai') || norm.includes('ket qua') || norm.includes('diem thi')) {
+          if (colMap.xepLoai === undefined) { colMap.xepLoai = colIdx; rowMatches++; }
         }
       });
 

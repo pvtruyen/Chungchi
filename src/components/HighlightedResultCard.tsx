@@ -11,7 +11,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const handleCopy = () => {
-    const textToCopy = `STT: ${record.stt} - Ngày cấp: ${record.ngayCap} - MSSV: ${record.mssv} (${record.hoVaTen})`;
+    const textToCopy = `STT: ${record.stt} - Số vào sổ gốc: ${record.soVaoSoGoc} - MSSV: ${record.mssv} (${record.hoVaTen})`;
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -30,7 +30,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
     }
 
     // Prepare speech text in Vietnamese
-    const speechText = `Số thứ tự ${record.stt}. Ngày cấp ${record.ngayCap.replace(/\//g, ' tháng ').replace(/ tháng (\d{4})$/, ' năm $1')}. Sinh viên ${record.hoVaTen}.`;
+    const speechText = `Số thứ tự ${record.stt}. Số vào sổ gốc ${record.soVaoSoGoc}. Sinh viên ${record.hoVaTen}.`;
     const utterance = new SpeechSynthesisUtterance(speechText);
     utterance.lang = 'vi-VN';
     utterance.rate = 0.9; // clear, steady pace
@@ -72,7 +72,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
                   ? 'bg-amber-500 text-slate-950 border-amber-400 animate-pulse'
                   : 'bg-slate-800/80 hover:bg-slate-800 text-amber-300 border-amber-500/30'
               }`}
-              title="Nhấn để đọc to số thứ tự và ngày cấp cho cán bộ nghe"
+              title="Nhấn để đọc to số thứ tự và số vào sổ gốc cho cán bộ nghe"
             >
               {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               <span>{isSpeaking ? 'Đang đọc...' : 'Đọc to 🔊'}</span>
@@ -81,7 +81,7 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
             <button
               onClick={handleCopy}
               className="flex items-center space-x-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
-              title="Sao chép nhanh STT và Ngày cấp"
+              title="Sao chép nhanh STT và Số vào sổ gốc"
             >
               {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
