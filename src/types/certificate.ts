@@ -1,18 +1,21 @@
 export interface CertificateRecord {
   id: string;
   stt: number | string;
-  soHieuChungChi: string;      // Số văn bằng (VD: C123456 / QPAN-2025-0812)
-  soVaoSoGoc: string;          // Số vào sổ gốc / Số quản lý (VD: 142/2025/GDQP)
+  soHieuChungChi: string;      // Số Hiệu (Số văn bằng - VD: C123456 / QPAN-2025-0812)
+  soVaoSoGoc: string;          // Số vào sổ / Số vào sổ gốc (VD: 142/2025/GDQP)
   tenChungChi: string;         // Tên chứng chỉ (Mặc định: Chứng chỉ Giáo dục Quốc phòng và An ninh)
-  hoVaTen: string;             // Họ chữ đệm và tên
+  hoVaTen: string;             // Họ và tên người học
   mssv: string;                // Mã người học (MSSV)
-  ngaySinh: string;            // Ngày tháng năm sinh (dd/mm/yyyy)
-  gioiTinh: string;            // Nam / Nữ
-  ngayCap: string;             // Ngày cấp (dd/mm/yyyy)
-  donViCap?: string;           // Trung tâm GDQP&AN / Đại học
-  khoaHoc?: string;            // K48, Khóa 2023-2027, etc.
+  ngaySinh: string;            // Ngày Sinh (dd/mm/yyyy)
+  noiSinh?: string;            // Nơi sinh (VD: Cần Thơ, Hậu Giang, An Giang...)
+  gioiTinh: string;            // Giới tính (Nam / Nữ)
+  danToc?: string;             // Dân tộc (Kinh, Khmer, Hoa...)
+  khoaHoc?: string;            // Khóa / Khóa học (K47, K48, Khóa 2022-2026...)
+  nganhDaoTao?: string;        // Ngành / Ngành đào tạo (CNTT, Kế toán, Luật...)
+  xepLoai?: string;            // Xếp loại (Giỏi, Khá, Trung bình, Đạt...)
+  ngayCap: string;             // Ngày cấp (dd/mm/yyyy - có thể không có hoặc lấy theo đợt)
+  donViCap?: string;           // Trung tâm GDQP&AN / Đại học Cần Thơ
   fileName?: string;           // Tên file Excel nguồn
-  xepLoai?: string;            // Giỏi / Khá / Trung bình (nếu có)
 }
 
 export interface SearchState {
@@ -55,8 +58,12 @@ export interface SearchHistoryItem {
   tenChungChi?: string;
   donViCap?: string;
   khoaHoc?: string;
+  nganhDaoTao?: string;
   ngaySinh?: string;
+  noiSinh?: string;
   gioiTinh?: string;
+  danToc?: string;
+  xepLoai?: string;
   fileName?: string;
   timestamp: string;
   timeFormatted: string;

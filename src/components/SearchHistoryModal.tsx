@@ -104,17 +104,22 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
   const handleExportExcel = () => {
     if (historyItems.length === 0) return;
 
-    const exportRows = historyItems.map((item, idx) => ({
+    const exportRows = historyItems.map((item) => ({
       STT_CapPhat: item.stt,
       MSSV: item.mssv,
       HoVaTen: item.hoVaTen,
       NgaySinh: item.ngaySinh || '',
+      NoiSinh: item.noiSinh || '',
       GioiTinh: item.gioiTinh || '',
-      NgayCap_DotHoc: item.ngayCap,
+      DanToc: item.danToc || '',
+      Khoa: item.khoaHoc || '',
+      NganhDaoTao: item.nganhDaoTao || '',
+      XepLoai: item.xepLoai || '',
       SoHieuChungChi: item.soHieuChungChi,
       SoVaoSoGoc: item.soVaoSoGoc,
+      NgayCap_DotHoc: item.ngayCap,
       TenChungChi: item.tenChungChi || 'Chứng chỉ Giáo dục Quốc phòng và An ninh',
-      DonViCap: item.donViCap || 'Trung tâm GDQP&AN',
+      DonViCap: item.donViCap || 'Trung tâm GDQP&AN - Đại học Cần Thơ',
       ThoiGianTraCuu: item.timeFormatted,
       TrangThaiPhat: item.daPhat ? `ĐÃ PHÁT (${item.ngayPhat || ''})` : 'CHƯA PHÁT',
     }));
@@ -303,9 +308,9 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
                 <thead>
                   <tr className="bg-slate-900 text-white font-bold">
                     <th className="p-3 border-b border-slate-800 w-24">STT RÚT BẰNG</th>
-                    <th className="p-3 border-b border-slate-800">SINH VIÊN</th>
-                    <th className="p-3 border-b border-slate-800">NGÀY CẤP / ĐỢT HỌC</th>
-                    <th className="p-3 border-b border-slate-800">SỐ HIỆU / SỐ SỔ</th>
+                    <th className="p-3 border-b border-slate-800">SINH VIÊN &amp; NƠI SINH</th>
+                    <th className="p-3 border-b border-slate-800">KHÓA, NGÀNH &amp; XẾP LOẠI</th>
+                    <th className="p-3 border-b border-slate-800">SỐ HIỆU / SỐ SỔ GỐC</th>
                     <th className="p-3 border-b border-slate-800">THỜI GIAN TRA CỨU</th>
                     <th className="p-3 border-b border-slate-800 text-center">TRẠNG THÁI PHÁT BẰNG</th>
                     <th className="p-3 border-b border-slate-800 text-right w-12">XÓA</th>
@@ -339,7 +344,7 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
                         <div className="font-bold text-slate-900 text-sm">
                           {item.hoVaTen}
                         </div>
-                        <div className="flex items-center space-x-2 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                           <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded text-[11px] border border-emerald-200">
                             {item.mssv}
                           </span>
@@ -348,24 +353,42 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
                               • {item.gioiTinh}
                             </span>
                           )}
+                          {item.danToc && (
+                            <span className="text-[11px] text-slate-500">
+                              • DT: {item.danToc}
+                            </span>
+                          )}
                           {item.ngaySinh && (
                             <span className="text-[11px] text-slate-500">
-                              • {item.ngaySinh}
+                              • NS: {item.ngaySinh}
+                            </span>
+                          )}
+                          {item.noiSinh && (
+                            <span className="text-[11px] text-slate-500">
+                              • {item.noiSinh}
                             </span>
                           )}
                         </div>
                       </td>
 
-                      {/* NGÀY CẤP / ĐỢT HỌC */}
+                      {/* KHÓA, NGÀNH & XẾP LOẠI */}
                       <td className="p-3 align-middle">
-                        <div className="font-bold font-mono text-emerald-700 text-xs">
-                          {item.ngayCap}
+                        <div className="font-semibold text-slate-800 text-xs">
+                          {item.nganhDaoTao || 'Đại học Cần Thơ'}
                         </div>
-                        {item.khoaHoc && (
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {item.khoaHoc}
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 text-[11px] text-slate-500 mt-0.5">
+                          {item.khoaHoc && <span>{item.khoaHoc}</span>}
+                          {item.xepLoai && (
+                            <span className="font-semibold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-200">
+                              {item.xepLoai}
+                            </span>
+                          )}
+                          {item.ngayCap && (
+                            <span className="font-mono text-slate-600">
+                              • {item.ngayCap}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* SỐ HIỆU & SỐ SỔ GỐC */}

@@ -182,10 +182,18 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     }
   };
 
-  // Handle Direct Excel Upload (.xlsx, .xls) - Appends file-by-file without hanging
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Process files sequentially (from input or drag-and-drop)
+  const processFilesSequentially = async (files: FileList | File[]) => {
+    const filesArray = Array.from(files).filter(f => 
+      f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.type.includes('spreadsheet') || f.type.includes('excel')
+    );
+
+    if (filesArray.length === 0) {
+      setErrorMsg('Vui lòng chọn file bảng tính định dạng Excel (.xlsx, .xls).');
+      return;
+    }
 
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -194,12 +202,15 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     try {
       let totalAddedAllFiles = 0;
       let lastUploadedCount = 0;
+      let successFileNames: string[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+      for (let i = 0; i < filesArray.length; i++) {
+        const file = filesArray[i];
+        const basePct = Math.round((i / filesArray.length) * 100);
+        
         setScanProgress({ 
-          message: `Đang đọc file [${file.name}] (${i + 1}/${files.length})...`, 
-          percent: 15 
+          message: `Đang đọc file ${i + 1}/${filesArray.length}: [${file.name}]...`, 
+          percent: basePct + 2 
         });
 
         const buffer = await file.arrayBuffer();
@@ -214,16 +225,17 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         appendRecords(records, 'local_excel', file.name);
 
         // 2. Append to Cloud Firestore with progress
-        setScanProgress({ 
-          message: `Đang đồng bộ ${records.length} chứng chỉ từ [${file.name}] lên Cloud Firebase...`, 
-          percent: 40 
-        });
-
         const cloudRes = await appendRecordsToCloud(
           records,
           'local_excel',
           file.name,
-          (msg, pct) => setScanProgress({ message: msg, percent: pct })
+          (msg, stepPct) => {
+            const scaledPct = Math.round(basePct + ((stepPct / 100) * (100 / filesArray.length)));
+            setScanProgress({ 
+              message: `(${i + 1}/${filesArray.length}) [${file.name}]: ${msg}`, 
+              percent: Math.min(98, scaledPct) 
+            });
+          }
         );
 
         if (!cloudRes.success) {
@@ -232,15 +244,18 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
 
         totalAddedAllFiles += records.length;
         lastUploadedCount = cloudRes.totalInCloud;
+        successFileNames.push(file.name);
       }
 
       onDataUpdated();
 
       if (totalAddedAllFiles === 0) {
-        throw new Error('Không tìm thấy bản ghi chứng chỉ hợp lệ nào trong file Excel được tải lên. Hãy kiểm tra các cột Mã người học (MSSV), Họ tên, Số hiệu, Số vào sổ gốc.');
+        throw new Error('Không tìm thấy bản ghi chứng chỉ hợp lệ nào trong các file Excel được tải lên. Hãy kiểm tra các cột thông tin.');
       }
 
-      setSuccessMsg(`Đã nạp và cộng dồn thành công ${totalAddedAllFiles} chứng chỉ vào cơ sở dữ liệu Cloud Firebase (Tổng hệ thống hiện tại: ${lastUploadedCount} chứng chỉ)! Bạn có thể tiếp tục tải thêm các file khác.`);
+      setSuccessMsg(
+        `Đã nạp và cộng dồn thành công ${totalAddedAllFiles} chứng chỉ từ ${successFileNames.length} file vào Cloud Firebase (Tổng chứng chỉ toàn hệ thống hiện có: ${lastUploadedCount})! Bạn có thể tiếp tục tải thêm các file khác.`
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi đọc file Excel';
       setErrorMsg(msg);
@@ -250,6 +265,30 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processFilesSequentially(e.target.files);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFilesSequentially(e.dataTransfer.files);
     }
   };
 
@@ -622,23 +661,31 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
             <div className="space-y-4">
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-emerald-500/50 hover:border-emerald-600 rounded-2xl p-6 sm:p-8 text-center bg-emerald-50/20 hover:bg-emerald-50/40 transition-all cursor-pointer group"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all cursor-pointer group ${
+                  isDragging
+                    ? 'border-emerald-600 bg-emerald-100/60 scale-[1.01] shadow-lg'
+                    : 'border-emerald-500/50 hover:border-emerald-600 bg-emerald-50/20 hover:bg-emerald-50/40'
+                }`}
               >
                 <FileSpreadsheet className="w-12 h-12 text-emerald-600 mx-auto mb-3 group-hover:scale-110 transition-transform" />
                 <h4 className="font-bold text-slate-800 text-base mb-1">
-                  Nhấp hoặc Kéo thả file Excel (.xlsx, .xls) để thêm dữ liệu
+                  {isDragging ? 'Thả các file Excel vào đây để nạp' : 'Chọn hoặc Kéo thả nhiều file Excel (.xlsx, .xls) cùng lúc'}
                 </h4>
-                <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                  <strong>Khuyên dùng:</strong> Tải lên từng file một (từng đợt K46, K47, K48...) để hệ thống tự động cộng dồn vào cơ sở dữ liệu Cloud, mượt mà và không lo treo máy khi file có hàng nghìn dòng.
+                <p className="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+                  Cho phép chọn <strong>nhiều file cùng lúc</strong> (hoặc kéo thả nhiều file). Hệ thống tự động nạp tuần tự từng file, tính toán tiến trình và <strong>cộng dồn dữ liệu vào Cloud Firebase</strong> cực nhanh, mượt mà và không lo treo trình duyệt.
                 </p>
-                <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-700 font-semibold bg-emerald-100/60 px-3 py-1 rounded-lg">
+                <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-700 font-semibold bg-emerald-100/70 hover:bg-emerald-200/80 px-3.5 py-1.5 rounded-xl border border-emerald-300 shadow-2xs">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Chọn file Excel từ máy tính</span>
+                  <span>Chọn 1 hoặc nhiều file Excel từ máy tính</span>
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".xlsx, .xls"
+                  multiple
                   onChange={handleFileUpload}
                   className="hidden"
                 />
@@ -651,9 +698,9 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                     <span>{scanProgress.message}</span>
                     <span className="font-mono font-bold text-emerald-600">{scanProgress.percent}%</span>
                   </div>
-                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                  <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                     <div
-                      className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
+                      className="bg-emerald-600 h-2.5 rounded-full transition-all duration-300"
                       style={{ width: `${scanProgress.percent}%` }}
                     />
                   </div>
@@ -664,12 +711,12 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 space-y-1.5">
                 <div className="flex items-center gap-1.5 font-bold text-emerald-900">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Tính năng nhận diện tự động &amp; Lưu trữ Đám mây:</span>
+                  <span>Nhận diện linh hoạt 11 trường thông tin &amp; Nạp tuần tự lên Cloud:</span>
                 </div>
                 <ul className="text-[11px] text-emerald-800 space-y-1 list-disc pl-5">
-                  <li><strong>Chỉ bỏ 1 dòng tiêu đề:</strong> Dữ liệu được đọc ngay từ dòng tiếp theo mà không bị bỏ sót.</li>
-                  <li><strong>Tự nhận diện linh hoạt các cột:</strong> Mã người học (MSSV), Họ tên (Họ và tên, họ lót và tên...), Số hiệu, Số vào sổ gốc, Ngày cấp (nếu có). Không quy định cố định vị trí cột.</li>
-                  <li><strong>Cộng dồn tự động (Append):</strong> Nạp từng file nối tiếp nhau, dữ liệu được tự động lưu vĩnh viễn lên Cloud Firebase để mọi điện thoại/máy tính khác đều tra cứu tức thì.</li>
+                  <li><strong>Chỉ bỏ 01 dòng tiêu đề:</strong> Đọc dữ liệu ngay từ dòng thứ 2 (dòng kế tiếp header), không bỏ sót bất kỳ bản ghi nào.</li>
+                  <li><strong>Tự nhận diện linh hoạt 11 trường thông tin:</strong> MSSV, Họ và tên người học, Ngày Sinh, Nơi sinh, Giới tính, Dân tộc, Khóa, Ngành đào tạo, Xếp loại, Số Hiệu, Số vào sổ (và Ngày cấp nếu có). Không cố định vị trí cột.</li>
+                  <li><strong>Nạp tuần tự &amp; Cộng dồn (Append):</strong> Chọn nhiều file cùng lúc, hệ thống nạp tuần tự từng file và lưu trữ vĩnh viễn lên Cloud Firebase. Dữ liệu tra cứu đồng bộ tức thời trên mọi thiết bị và IP khác nhau.</li>
                 </ul>
               </div>
 

@@ -8,6 +8,7 @@ import {
   writeBatch, 
   collection, 
   getDocs,
+  getCountFromServer,
   limit,
   query,
   orderBy,
@@ -184,9 +185,14 @@ export async function appendRecordsToCloud(
     const existingFiles = existingMeta && Array.isArray(existingMeta.fileNames) ? existingMeta.fileNames : [];
     const updatedFiles = existingFiles.includes(fileName) ? existingFiles : [...existingFiles, fileName];
 
-    // Count current unique documents in Firestore
-    const countSnap = await getDocs(collection(db, COLLECTION_CERTIFICATES));
-    const totalInCloud = countSnap.size;
+    // Ultra-fast server aggregation count without downloading document payloads
+    let totalInCloud = 0;
+    try {
+      const countSnap = await getCountFromServer(collection(db, COLLECTION_CERTIFICATES));
+      totalInCloud = countSnap.data().count;
+    } catch {
+      totalInCloud = (existingMeta?.totalRecords || 0) + uploaded;
+    }
 
     const statusData: SyncStatus = {
       source,
@@ -313,8 +319,12 @@ export async function recordSearchEvent(
         tenChungChi: record.tenChungChi,
         donViCap: record.donViCap,
         khoaHoc: record.khoaHoc,
+        nganhDaoTao: record.nganhDaoTao,
         ngaySinh: record.ngaySinh,
+        noiSinh: record.noiSinh,
         gioiTinh: record.gioiTinh,
+        danToc: record.danToc,
+        xepLoai: record.xepLoai,
         fileName: record.fileName,
         timestamp: now.toISOString(),
         timeFormatted,

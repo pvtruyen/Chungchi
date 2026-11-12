@@ -140,18 +140,33 @@ export const HighlightedResultCard: React.FC<HighlightedResultCardProps> = ({ re
 
         {/* Quick Identity Footnote */}
         <div className="mt-5 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs sm:text-sm text-slate-300">
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-slate-400">Người học:</span>
             <strong className="text-white font-bold text-base">{record.hoVaTen}</strong>
             <span className="text-amber-400 font-mono font-bold bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
               {record.mssv}
             </span>
+            {record.khoaHoc && (
+              <span className="text-slate-400 text-xs bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700">
+                {record.khoaHoc}
+              </span>
+            )}
+            {record.nganhDaoTao && (
+              <span className="text-emerald-400 text-xs bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                {record.nganhDaoTao}
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center space-x-3 text-slate-400">
+          <div className="flex items-center space-x-3 text-slate-400 text-xs">
             {record.stt && (
               <div>
                 <span>STT:</span> <strong className="text-amber-300 font-mono font-bold">{record.stt}</strong>
+              </div>
+            )}
+            {record.xepLoai && (
+              <div>
+                <span>• Loại:</span> <strong className="text-emerald-300 font-bold">{record.xepLoai}</strong>
               </div>
             )}
             {record.ngayCap && (

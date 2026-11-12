@@ -82,6 +82,11 @@ function findStudentNameInRow(
   if (colMap.mssv !== undefined) ignoredCols.add(colMap.mssv);
   if (colMap.stt !== undefined) ignoredCols.add(colMap.stt);
   if (colMap.ngaySinh !== undefined) ignoredCols.add(colMap.ngaySinh);
+  if (colMap.noiSinh !== undefined) ignoredCols.add(colMap.noiSinh);
+  if (colMap.danToc !== undefined) ignoredCols.add(colMap.danToc);
+  if (colMap.khoaHoc !== undefined) ignoredCols.add(colMap.khoaHoc);
+  if (colMap.nganhDaoTao !== undefined) ignoredCols.add(colMap.nganhDaoTao);
+  if (colMap.xepLoai !== undefined) ignoredCols.add(colMap.xepLoai);
   if (colMap.ngayCap !== undefined) ignoredCols.add(colMap.ngayCap);
   if (colMap.soHieu !== undefined) ignoredCols.add(colMap.soHieu);
   if (colMap.soVaoSo !== undefined) ignoredCols.add(colMap.soVaoSo);
@@ -255,11 +260,53 @@ export function parseExcelFile(
         ) {
           if (currentMap.ngaySinh === undefined) { currentMap.ngaySinh = colIdx; rowMatches++; }
         }
-        // 9. Giới tính
+        // 9. Nơi sinh
+        else if (
+          norm === 'noi sinh' ||
+          norm.includes('noi sinh') ||
+          norm === 'que quan' ||
+          norm === 'nguyen quan'
+        ) {
+          if (currentMap.noiSinh === undefined) { currentMap.noiSinh = colIdx; rowMatches++; }
+        }
+        // 10. Giới tính
         else if (norm.includes('gioi tinh') || norm === 'phai' || norm === 'gt') {
           if (currentMap.gioiTinh === undefined) { currentMap.gioiTinh = colIdx; rowMatches++; }
         }
-        // 10. Ngày cấp chứng chỉ
+        // 11. Dân tộc
+        else if (norm === 'dan toc' || norm.includes('dan toc') || norm === 'dt') {
+          if (currentMap.danToc === undefined) { currentMap.danToc = colIdx; rowMatches++; }
+        }
+        // 12. Khóa / Khóa học
+        else if (
+          norm === 'khoa hoc' ||
+          norm === 'khoa' ||
+          norm.includes('khoa hoc') ||
+          norm.startsWith('khoa ') ||
+          norm.includes('nien khoa')
+        ) {
+          if (currentMap.khoaHoc === undefined) { currentMap.khoaHoc = colIdx; rowMatches++; }
+        }
+        // 13. Ngành / Ngành đào tạo
+        else if (
+          norm === 'nganh dao tao' ||
+          norm === 'nganh' ||
+          norm.includes('nganh dao tao') ||
+          norm.includes('chuyen nganh') ||
+          (norm.includes('nganh') && !norm.includes('ngay'))
+        ) {
+          if (currentMap.nganhDaoTao === undefined) { currentMap.nganhDaoTao = colIdx; rowMatches++; }
+        }
+        // 14. Xếp loại / Điểm thi (nếu có)
+        else if (
+          norm.includes('xep loai') ||
+          norm.includes('ket qua') ||
+          norm.includes('diem thi') ||
+          norm.includes('xep loai diem thi')
+        ) {
+          if (currentMap.xepLoai === undefined) { currentMap.xepLoai = colIdx; rowMatches++; }
+        }
+        // 15. Ngày cấp chứng chỉ (có thể có hoặc không)
         else if (
           norm.includes('ngay cap') ||
           norm.includes('ngay thang cap') ||
@@ -271,29 +318,23 @@ export function parseExcelFile(
         ) {
           if (currentMap.ngayCap === undefined) { currentMap.ngayCap = colIdx; rowMatches++; }
         }
-        // 11. Đợt học / Đợt cấp / Khóa học
+        // 16. Đợt học / Đợt cấp
         else if (
           norm.includes('dot hoc') ||
           norm.includes('dot cap') ||
           norm.includes('dot thi') ||
           norm.includes('dot') ||
-          norm.includes('khoa hoc') ||
-          norm.includes('hoc ky') ||
-          norm.includes('nganh dao tao')
+          norm.includes('hoc ky')
         ) {
           if (currentMap.dotHoc === undefined) { currentMap.dotHoc = colIdx; rowMatches++; }
         }
-        // 12. Tên chứng chỉ
+        // 17. Tên chứng chỉ
         else if (norm.includes('ten chung chi') || norm.includes('loai chung chi') || norm.includes('ten van bang')) {
           if (currentMap.tenChungChi === undefined) { currentMap.tenChungChi = colIdx; rowMatches++; }
         }
-        // 13. Đơn vị cấp
+        // 18. Đơn vị cấp
         else if (norm.includes('don vi cap') || norm.includes('co so dao tao') || norm.includes('truong')) {
           if (currentMap.donViCap === undefined) { currentMap.donViCap = colIdx; rowMatches++; }
-        }
-        // 14. Xếp loại / Điểm thi
-        else if (norm.includes('xep loai') || norm.includes('ket qua') || norm.includes('diem thi')) {
-          if (currentMap.xepLoai === undefined) { currentMap.xepLoai = colIdx; rowMatches++; }
         }
       });
 
@@ -442,11 +483,18 @@ export function parseExcelFile(
         soVaoSo = `${stt}/GDQP`;
       }
 
-      // 6. Dynamic Ngày sinh & Giới tính
+      // 6. Dynamic Ngày sinh, Nơi sinh, Giới tính, Dân tộc
       const ngaySinh = getDateVal(row, 'ngaySinh');
+      const noiSinh = getVal(row, 'noiSinh');
       const gioiTinh = getVal(row, 'gioiTinh') || 'Nam';
+      const danToc = getVal(row, 'danToc') || 'Kinh';
 
-      // 7. Dynamic Ngày cấp (có thể không có)
+      // 7. Dynamic Khóa học, Ngành đào tạo, Xếp loại
+      const khoaHoc = getVal(row, 'khoaHoc') || getVal(row, 'dotHoc') || '';
+      const nganhDaoTao = getVal(row, 'nganhDaoTao') || '';
+      const xepLoai = getVal(row, 'xepLoai') || '';
+
+      // 8. Dynamic Ngày cấp (có thể không có hoặc lấy theo đợt)
       let ngayCap = getDateVal(row, 'ngayCap');
       if (!ngayCap || ngayCap.trim() === '') {
         const dotHoc = getVal(row, 'dotHoc');
@@ -455,8 +503,6 @@ export function parseExcelFile(
 
       const tenChungChi = getVal(row, 'tenChungChi') || 'Chứng chỉ Giáo dục Quốc phòng và An ninh';
       const donViCap = getVal(row, 'donViCap') || 'Trung tâm GDQP&AN - Đại học Cần Thơ';
-      const khoaHoc = getVal(row, 'dotHoc') || '';
-      const xepLoai = getVal(row, 'xepLoai') || '';
 
       records.push({
         id: `${cleanMssv}_${soHieu}_${r}`,
@@ -467,12 +513,15 @@ export function parseExcelFile(
         hoVaTen,
         mssv: cleanMssv,
         ngaySinh,
+        noiSinh,
         gioiTinh,
+        danToc,
+        khoaHoc,
+        nganhDaoTao,
+        xepLoai,
         ngayCap,
         donViCap,
-        khoaHoc,
         fileName,
-        xepLoai,
       });
     }
   }

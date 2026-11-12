@@ -12,10 +12,14 @@
         "hoVaTen": { "type": "string", "description": "Họ và tên người học" },
         "mssv": { "type": "string", "description": "Mã số sinh viên (Khóa chính)" },
         "ngaySinh": { "type": "string", "description": "Ngày tháng năm sinh" },
+        "noiSinh": { "type": "string", "description": "Nơi sinh" },
         "gioiTinh": { "type": "string", "description": "Giới tính (Nam/Nữ)" },
+        "danToc": { "type": "string", "description": "Dân tộc" },
+        "khoaHoc": { "type": "string", "description": "Khóa đào tạo" },
+        "nganhDaoTao": { "type": "string", "description": "Ngành đào tạo" },
+        "xepLoai": { "type": "string", "description": "Xếp loại kết quả học tập" },
         "ngayCap": { "type": "string", "description": "Ngày cấp chứng chỉ" },
         "donViCap": { "type": "string", "description": "Đơn vị cấp phát" },
-        "khoaHoc": { "type": "string", "description": "Khóa đào tạo" },
         "fileName": { "type": "string", "description": "Tên file Excel nguồn" }
       },
       "required": ["stt", "mssv", "hoVaTen", "ngayCap"]
