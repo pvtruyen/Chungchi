@@ -53,9 +53,10 @@ export const SearchHero: React.FC<SearchHeroProps> = ({
           Tra Cứu Thông Tin Chứng Chỉ GDQP&amp;AN
         </h2>
         <p className="text-blue-100 text-xs sm:text-sm md:text-base max-w-2xl mx-auto mb-6 leading-relaxed">
-          Nhập <strong className="text-amber-300 font-bold">Mã số sinh viên (MSSV)</strong> để nhận ngay{' '}
+          Nhập <strong className="text-amber-300 font-bold">Mã số sinh viên (MSSV)</strong> hoặc{' '}
+          <strong className="text-amber-300 font-bold">Họ và tên</strong> để nhận ngay{' '}
           <strong className="text-amber-300 font-bold">Số lưu vào sổ gốc</strong> và{' '}
-          <strong className="text-sky-200 font-bold">Số hiệu văn bằng</strong> phục vụ kiểm tra và cấp phát nhanh chóng.
+          <strong className="text-sky-200 font-bold">Số hiệu văn bằng</strong> đối chiếu cấp phát.
         </p>
 
         {/* Search Input Box */}
@@ -69,9 +70,9 @@ export const SearchHero: React.FC<SearchHeroProps> = ({
               type="text"
               value={inputVal}
               onChange={(e) => setInputVal(e.target.value)}
-              placeholder="Nhập Mã số sinh viên (VD: B2101234, B2209999)..."
+              placeholder="Nhập MSSV (VD: B2101234) hoặc Họ và tên sinh viên..."
               autoFocus
-              className="w-full py-2.5 px-2 text-slate-900 placeholder:text-slate-400 font-semibold sm:text-lg focus:outline-none uppercase tracking-wider"
+              className="w-full py-2.5 px-2 text-slate-900 placeholder:text-slate-400 font-semibold sm:text-lg focus:outline-none tracking-wide"
             />
 
             {inputVal && (

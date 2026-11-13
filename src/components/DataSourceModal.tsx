@@ -3,7 +3,6 @@ import {
   X,
   FolderSync,
   Upload,
-  Link,
   Database,
   CheckCircle2,
   AlertCircle,
@@ -11,7 +10,6 @@ import {
   Sparkles,
   LogOut,
   RefreshCw,
-  FolderOpen,
   Lock,
   KeyRound,
   ShieldCheck,
@@ -19,6 +17,11 @@ import {
   Search,
   TableProperties,
   AlertTriangle,
+  Flame,
+  Copy,
+  Check,
+  RotateCcw,
+  HardDrive,
 } from 'lucide-react';
 import { SyncStatus, CertificateRecord } from '../types/certificate';
 import { googleSignIn, googleSignInAdmin, logoutGoogle, auth } from '../services/firebaseAuth';
@@ -31,6 +34,10 @@ import {
   removeLocalRecord,
   saveAppsScriptUrl,
   getSavedAppsScriptUrl,
+  saveDriveFolderUrl,
+  getSavedDriveFolderUrl,
+  extractDriveFolderId,
+  switchDataSourceMode,
   resetToDemo,
 } from '../services/storageService';
 import { queryAppsScript } from '../services/appsScriptConnector';
@@ -43,13 +50,26 @@ import {
   deleteRecordFromCloud,
   seedCloudIfEmpty,
 } from '../services/firestoreService';
+import {
+  firebaseConfig,
+  parseFirebaseConfigText,
+  saveAndReconnectFirebase,
+  resetToDefaultFirebaseConfig,
+  isUsingCustomFirebaseConfig,
+  testFirestoreConnection,
+} from '../services/firebaseConfig';
+import { buildShortAppsScriptCode } from '../data/deploymentGuide';
 import { ConfirmModal } from './ConfirmModal';
+
+export type DataSourceModalTab = 'firebase_config' | 'drive_config' | 'upload' | 'manage' | 'demo';
 
 interface DataSourceModalProps {
   isOpen: boolean;
   onClose: () => void;
   syncStatus: SyncStatus;
   onDataUpdated: () => void;
+  onFirebaseConfigChanged?: () => void;
+  initialTab?: DataSourceModalTab;
   isLoggedInGoogle: boolean;
   userEmail: string | null;
   onLoginSuccess: (email: string, token: string) => void;
@@ -66,14 +86,24 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   onClose,
   syncStatus,
   onDataUpdated,
+  onFirebaseConfigChanged,
+  initialTab = 'firebase_config',
   isLoggedInGoogle,
   userEmail,
   onLoginSuccess,
   onLogoutSuccess,
 }) => {
-  // CRITICAL: All hooks must be declared unconditionally at the top before any early return
-  const [activeTab, setActiveTab] = useState<'upload' | 'manage' | 'drive' | 'appsscript' | 'demo'>('upload');
-  const [appsScriptUrlInput, setAppsScriptUrlInput] = useState(getSavedAppsScriptUrl());
+  // CRITICAL: All hooks declared unconditionally before any early return
+  const [activeTab, setActiveTab] = useState<DataSourceModalTab>(initialTab);
+  const [firebaseSnippetInput, setFirebaseSnippetInput] = useState('');
+  const [isTestingFirebase, setIsTestingFirebase] = useState(false);
+  const [driveLinkInput, setDriveLinkInput] = useState(
+    () => getSavedAppsScriptUrl() || getSavedDriveFolderUrl()
+  );
+  const [savedDriveFolderId, setSavedDriveFolderId] = useState(() =>
+    extractDriveFolderId(getSavedDriveFolderUrl())
+  );
+  const [copiedScript, setCopiedScript] = useState(false);
   const [isScanningDrive, setIsScanningDrive] = useState(false);
   const [scanProgress, setScanProgress] = useState<{ message: string; percent: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -92,6 +122,8 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
 
   const isFirebaseAuthenticated = isLoggedInGoogle || Boolean(auth.currentUser);
   const activeAuthEmail = userEmail || auth.currentUser?.email || null;
+  const parsedFirebasePreview = parseFirebaseConfigText(firebaseSnippetInput);
+  const isCustomFirebaseActive = isUsingCustomFirebaseConfig();
 
   const loadCloudRecordsList = async (prefix: string = manageSearchMssv) => {
     if (!auth.currentUser) {
@@ -118,6 +150,12 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   };
 
   useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
+
+  useEffect(() => {
     if (isOpen && activeTab === 'manage' && auth.currentUser) {
       loadCloudRecordsList(manageSearchMssv);
     }
@@ -125,6 +163,126 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   }, [isOpen, activeTab, isLoggedInGoogle]);
 
   if (!isOpen) return null;
+
+  const currentMode: 'firebase' | 'drive' = syncStatus.source === 'apps_script' ? 'drive' : 'firebase';
+
+  const handleSwitchMode = (mode: 'firebase' | 'drive') => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (mode === 'drive' && !getSavedAppsScriptUrl()) {
+      setActiveTab('drive_config');
+      setErrorMsg('Chưa có Link Google Apps Script Web App. Vui lòng dán link ở bên dưới và bấm "Kết nối & Lưu".');
+      return;
+    }
+    switchDataSourceMode(mode);
+    onDataUpdated();
+    setSuccessMsg(
+      mode === 'drive'
+        ? 'Đã chuyển sang Chế độ 2: Thư mục Google Drive ("Số hóa chứng chỉ").'
+        : 'Đã chuyển sang Chế độ 1: Dữ liệu Firebase Cloud.'
+    );
+  };
+
+  const handleSaveFirebaseSnippet = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const parsed = parseFirebaseConfigText(firebaseSnippetInput);
+    if (!parsed) {
+      setErrorMsg(
+        'Không nhận diện được apiKey và projectId hợp lệ. Vui lòng dán nguyên đoạn const firebaseConfig = { ... }; lấy từ Firebase Console.'
+      );
+      return;
+    }
+
+    setIsTestingFirebase(true);
+    try {
+      const ok = saveAndReconnectFirebase(parsed);
+      if (!ok) {
+        throw new Error('Cấu hình Firebase không hợp lệ.');
+      }
+      await testFirestoreConnection();
+      onFirebaseConfigChanged?.();
+      switchDataSourceMode('firebase');
+      onDataUpdated();
+      setSuccessMsg(
+        `Đã bóc tách và kết nối thành công tới dự án Firebase [${parsed.projectId}]! Cấu hình đã được lưu tự động.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi kết nối Firebase mới';
+      setErrorMsg(msg);
+    } finally {
+      setIsTestingFirebase(false);
+    }
+  };
+
+  const handleResetDefaultFirebase = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    resetToDefaultFirebaseConfig();
+    await testFirestoreConnection();
+    onFirebaseConfigChanged?.();
+    onDataUpdated();
+    setFirebaseSnippetInput('');
+    setSuccessMsg('Đã khôi phục kết nối về cơ sở dữ liệu Firebase mặc định của ứng dụng.');
+  };
+
+  const handleSaveDriveConnection = async () => {
+    const raw = driveLinkInput.trim();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    if (!raw) {
+      setErrorMsg('Vui lòng dán Link thư mục Google Drive hoặc Link Google Apps Script Web App.');
+      return;
+    }
+
+    // Case 1: Google Apps Script Web App URL
+    if (raw.includes('script.google.com/macros/')) {
+      setIsTestingAppsScript(true);
+      try {
+        const test = await queryAppsScript(raw, 'TEST_PING');
+        if (!test.success && test.error && !test.error.includes('Không tìm thấy')) {
+          throw new Error(test.error);
+        }
+        saveAppsScriptUrl(raw);
+        switchDataSourceMode('drive');
+        onDataUpdated();
+        setSuccessMsg(
+          'Đã kết nối & lưu thành công Chế độ 2 (Google Apps Script đọc thư mục "Số hóa chứng chỉ")! Sinh viên có thể tra cứu trực tiếp ngay.'
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Không thể kết nối tới Google Apps Script';
+        setErrorMsg(
+          `Kiểm tra thất bại: ${msg}. Hãy đảm bảo bạn đã Deploy Web App với quyền truy cập "Anyone" (Bất kỳ ai).`
+        );
+      } finally {
+        setIsTestingAppsScript(false);
+      }
+      return;
+    }
+
+    // Case 2: Google Drive Folder Share Link (or Folder ID)
+    const folderId = extractDriveFolderId(raw);
+    if (folderId) {
+      saveDriveFolderUrl(raw);
+      setSavedDriveFolderId(folderId);
+      setSuccessMsg(
+        `Đã lưu ID thư mục Google Drive (${folderId}) và tự động điền sẵn vào đoạn Script bên dưới! Hãy nhấn "Copy Script", dán vào Apps Script -> Deploy -> rồi dán link Web App vào lại ô này để kích hoạt tra cứu công khai.`
+      );
+      return;
+    }
+
+    setErrorMsg(
+      'Đường link không đúng định dạng. Vui lòng dán Link chia sẻ thư mục Google Drive (drive.google.com/drive/folders/...) hoặc Link Web App Apps Script (script.google.com/macros/...).'
+    );
+  };
+
+  const handleCopyShortScript = () => {
+    navigator.clipboard.writeText(buildShortAppsScriptCode(savedDriveFolderId));
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 2500);
+  };
 
   const handleLockAdminSession = () => {
     revokeAdminSession();
@@ -167,21 +325,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     }
   };
 
-  const handleGoogleDriveLogin = async () => {
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    try {
-      const res = await googleSignIn();
-      if (res) {
-        onLoginSuccess(res.user.email || 'Cán bộ Quản trị', res.accessToken);
-        setSuccessMsg(`Kết nối Google Drive thành công: ${res.user.email}`);
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Lỗi đăng nhập Google';
-      setErrorMsg(`Đăng nhập thất bại: ${msg}`);
-    }
-  };
-
   const handleGoogleLogout = async () => {
     await logoutGoogle();
     onLogoutSuccess();
@@ -189,7 +332,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     setSuccessMsg('Đã đăng xuất tài khoản Firebase.');
   };
 
-  // Scanning Google Drive folder: My Drive\GDQP\Số hóa chứng chỉ
   const handleScanDriveFolder = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -202,30 +344,34 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         throw new Error('Chưa có quyền truy cập Google Drive. Vui lòng đăng nhập.');
       }
 
-      setScanProgress({ message: 'Đang tìm thư mục "GDQP / Số hóa chứng chỉ"...', percent: 15 });
-      const folder = await findGdqpFolder(res.accessToken);
+      let folderIdToScan = savedDriveFolderId;
+      let folderDisplayName = 'Số hóa chứng chỉ';
 
-      if (!folder) {
-        throw new Error(
-          'Không tìm thấy thư mục "GDQP" hoặc "Số hóa chứng chỉ" trong My Drive của tài khoản Google này.'
-        );
+      if (!folderIdToScan) {
+        setScanProgress({ message: 'Đang tìm thư mục "GDQP / Số hóa chứng chỉ"...', percent: 15 });
+        const folder = await findGdqpFolder(res.accessToken);
+        if (!folder) {
+          throw new Error('Không tìm thấy thư mục "GDQP" hoặc "Số hóa chứng chỉ" trong My Drive.');
+        }
+        folderIdToScan = folder.folderId;
+        folderDisplayName = folder.folderPath;
       }
 
-      setScanProgress({ message: `Đã tìm thấy: ${folder.folderPath}. Đang quét file...`, percent: 25 });
+      setScanProgress({ message: `Đang quét các file Excel trong "${folderDisplayName}"...`, percent: 25 });
       const scanResult = await scanDriveFolderForCertificates(
         res.accessToken,
-        folder.folderId,
+        folderIdToScan,
         (msg, pct) => setScanProgress({ message: msg, percent: pct })
       );
 
       if (scanResult.records.length === 0) {
-        throw new Error(`Thư mục "${folder.folderPath}" hiện chưa có file Excel hợp lệ.`);
+        throw new Error(`Thư mục "${folderDisplayName}" hiện chưa có file Excel hợp lệ.`);
       }
 
       saveRecords(scanResult.records, 'drive_oauth', scanResult.filesScanned);
       onDataUpdated();
 
-      setScanProgress({ message: 'Đang lưu trữ lên Cloud Firestore...', percent: 85 });
+      setScanProgress({ message: 'Đang đồng bộ lên Cloud Firestore...', percent: 85 });
       const cloudRes = await saveRecordsToCloud(
         scanResult.records,
         'drive_oauth',
@@ -238,7 +384,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       }
 
       setSuccessMsg(
-        `Đồng bộ thành công ${scanResult.records.length.toLocaleString('vi-VN')} chứng chỉ từ Google Drive lên Cloud Firestore!`
+        `Đã quét & đồng bộ ${scanResult.records.length.toLocaleString('vi-VN')} chứng chỉ từ Google Drive lên Cloud Firestore!`
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi quét thư mục Google Drive';
@@ -249,7 +395,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     }
   };
 
-  // Process Excel / CSV files sequentially & append to Cloud Firestore
   const processFilesSequentially = async (files: FileList | File[]) => {
     const filesArray = Array.from(files).filter((f) => {
       const lower = f.name.toLowerCase();
@@ -303,10 +448,8 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
           continue;
         }
 
-        // 1. Append to lightweight local index
         appendRecords(records, 'local_excel', file.name);
 
-        // 2. Batch append to Cloud Firestore without overwriting old records
         const cloudRes = await appendRecordsToCloud(
           records,
           'local_excel',
@@ -422,37 +565,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     }
   };
 
-  const handleSaveAppsScriptUrl = async () => {
-    const url = appsScriptUrlInput.trim();
-    if (!url) {
-      setErrorMsg('Vui lòng nhập đường link Google Apps Script Web App');
-      return;
-    }
-
-    setIsTestingAppsScript(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const test = await queryAppsScript(url, 'TEST_PING');
-      if (test.error && !test.error.includes('Không tìm thấy')) {
-        throw new Error(test.error);
-      }
-
-      saveAppsScriptUrl(url);
-      saveRecords([], 'apps_script', ['Google Apps Script Live Endpoint']);
-      onDataUpdated();
-      setSuccessMsg('Đã kết nối thành công tới Google Apps Script Web App!');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Không thể kết nối tới Google Apps Script';
-      setErrorMsg(
-        `Kiểm tra thất bại: ${msg}. Đảm bảo bạn đã Deploy Web App ở chế độ "Anyone" (Bất kỳ ai).`
-      );
-    } finally {
-      setIsTestingAppsScript(false);
-    }
-  };
-
   const handleResetDemo = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -461,9 +573,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       await seedCloudIfEmpty();
     }
     onDataUpdated();
-    setSuccessMsg(
-      'Đã khôi phục dữ liệu mẫu chuẩn. Bạn có thể thử tra cứu ngay MSSV B2101234 hoặc B2105678.'
-    );
+    setSuccessMsg('Đã khôi phục dữ liệu mẫu chuẩn. Bạn có thể thử tra cứu ngay MSSV B2101234 hoặc B2105678.');
   };
 
   return (
@@ -478,10 +588,10 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  Quản Trị Nguồn Dữ Liệu &amp; Cloud Firestore
+                  Cài Đặt Hệ Thống &amp; Nguồn Dữ Liệu (Không Chạm Code)
                 </h3>
                 <p className="text-[11px] text-blue-200">
-                  Đại học Cần Thơ — Trung tâm Giáo dục Quốc phòng và An ninh
+                  Đại học Cần Thơ — Tự động cấu hình Firebase &amp; Google Drive trên trình duyệt
                 </p>
               </div>
             </div>
@@ -494,27 +604,41 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
             </button>
           </div>
 
-          {/* Current Database Status Banner */}
-          <div className="bg-blue-50/80 border-b border-blue-200 px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-[#003B73]">
-            <div className="flex items-center space-x-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-              <span>Nguồn hiện tại:</span>
-              <strong className="font-bold">
-                {syncStatus.source === 'drive_oauth'
-                  ? 'Google Drive + Cloud Firestore'
-                  : syncStatus.source === 'apps_script'
-                  ? 'Google Apps Script API'
-                  : syncStatus.source === 'local_excel'
-                  ? 'Cloud Firestore (Excel Cộng dồn)'
-                  : 'Dữ liệu mẫu thử nghiệm'}
-              </strong>
+          {/* Quick Mode Switcher Banner (Mode 1 vs Mode 2) */}
+          <div className="bg-blue-50/90 border-b border-blue-200 px-6 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-[#002855]">Chế độ tra cứu:</span>
+              <button
+                type="button"
+                onClick={() => handleSwitchMode('firebase')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  currentMode === 'firebase'
+                    ? 'bg-[#004B8D] text-white shadow-xs'
+                    : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-300" />
+                <span>Chế độ 1: Firebase Cloud</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSwitchMode('drive')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                  currentMode === 'drive'
+                    ? 'bg-[#004B8D] text-white shadow-xs'
+                    : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                <HardDrive className="w-3.5 h-3.5 text-sky-300" />
+                <span>Chế độ 2: Google Drive</span>
+              </button>
             </div>
-            <div className="font-mono font-extrabold text-[#002855] bg-white px-2.5 py-1 rounded-lg border border-blue-200">
+            <div className="font-mono font-extrabold text-[#002855] bg-white px-2.5 py-1 rounded-lg border border-blue-200 self-start sm:self-auto">
               {syncStatus.totalRecords.toLocaleString('vi-VN')} chứng chỉ
             </div>
           </div>
 
-          {/* Firebase Auth & Session Bar */}
+          {/* Firebase Auth & Admin Security Bar */}
           <div className="bg-[#001E3C] text-blue-100 px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs border-b border-blue-900">
             <div className="flex items-center space-x-2">
               <ShieldCheck
@@ -529,7 +653,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                 </span>
               ) : (
                 <span className="text-amber-200 font-medium">
-                  Chưa đăng nhập Firebase Auth (cần để ghi/xóa trên Cloud)
+                  Chưa đăng nhập Google Admin (cần để ghi/xóa trên Cloud)
                 </span>
               )}
             </div>
@@ -567,7 +691,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                 type="button"
                 onClick={handleLockAdminSession}
                 className="text-xs text-rose-300 hover:text-rose-200 hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                title="Khóa lại giao diện quản trị khi rời máy tính"
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>Khóa phiên</span>
@@ -638,6 +761,32 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
           <div className="flex border-b border-slate-200 px-6 pt-3 bg-slate-50 gap-2 overflow-x-auto">
             <button
               type="button"
+              onClick={() => setActiveTab('firebase_config')}
+              className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'firebase_config'
+                  ? 'border-[#004B8D] text-[#003B73]'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Flame className="w-4 h-4 text-amber-500" />
+              <span>1. Cài đặt Firebase</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('drive_config')}
+              className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'drive_config'
+                  ? 'border-[#004B8D] text-[#003B73]'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <HardDrive className="w-4 h-4 text-[#004B8D]" />
+              <span>2. Google Drive</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveTab('upload')}
               className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'upload'
@@ -646,7 +795,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               }`}
             >
               <Upload className="w-4 h-4" />
-              <span>1. Nạp Excel (Cộng dồn)</span>
+              <span>3. Nạp Excel (Cộng dồn)</span>
             </button>
 
             <button
@@ -659,33 +808,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               }`}
             >
               <TableProperties className="w-4 h-4" />
-              <span>2. Quản lý &amp; Xóa Dữ liệu</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('drive')}
-              className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                activeTab === 'drive'
-                  ? 'border-[#004B8D] text-[#003B73]'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <FolderSync className="w-4 h-4" />
-              <span>3. Google Drive</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('appsscript')}
-              className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                activeTab === 'appsscript'
-                  ? 'border-[#004B8D] text-[#003B73]'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Link className="w-4 h-4" />
-              <span>4. Apps Script</span>
+              <span>4. Quản lý &amp; Xóa</span>
             </button>
 
             <button
@@ -698,13 +821,195 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               }`}
             >
               <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>5. Dữ liệu mẫu</span>
+              <span>5. Mẫu thử</span>
             </button>
           </div>
 
           {/* Tab Content Body */}
           <div className="p-6 overflow-y-auto space-y-4 text-slate-700 text-sm flex-1">
-            {/* TAB 1: UPLOAD EXCEL / CSV & APPEND */}
+            {/* TAB 1: NO-CODE FIREBASE SETTINGS */}
+            {activeTab === 'firebase_config' && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        {isCustomFirebaseActive
+                          ? 'Đang kết nối bằng cấu hình Firebase tùy chỉnh của bạn'
+                          : 'Đã tự động kết nối sẵn Firebase Cloud của hệ thống'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-emerald-800 mt-0.5 font-mono">
+                      Project ID: <strong>{firebaseConfig.projectId}</strong>
+                    </div>
+                  </div>
+                  {isCustomFirebaseActive && (
+                    <button
+                      type="button"
+                      onClick={handleResetDefaultFirebase}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-[#004B8D] bg-white hover:bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200 cursor-pointer shrink-0"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Khôi phục mặc định</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-800">
+                    Dán nguyên đoạn <code className="text-[#004B8D]">firebaseConfig</code> từ Firebase Console (nếu muốn đổi sang dự án riêng):
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Không cần tách từng dòng! Chỉ cần sao chép toàn bộ đoạn <code>const firebaseConfig = &#123; ... &#125;;</code> và dán vào ô bên dưới, hệ thống sẽ tự động bóc tách.
+                  </p>
+                  <textarea
+                    rows={7}
+                    value={firebaseSnippetInput}
+                    onChange={(e) => setFirebaseSnippetInput(e.target.value)}
+                    placeholder={`const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  authDomain: "du-an-cua-ban.firebaseapp.com",\n  projectId: "du-an-cua-ban",\n  storageBucket: "du-an-cua-ban.firebasestorage.app",\n  messagingSenderId: "123456789",\n  appId: "1:123456789:web:abcdef"\n};`}
+                    className="w-full p-3.5 rounded-2xl border border-slate-300 bg-slate-50 focus:bg-white font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#00529C]"
+                  />
+                </div>
+
+                {/* Live Parsed Preview */}
+                {firebaseSnippetInput.trim() && (
+                  <div
+                    className={`p-3.5 rounded-xl border text-xs ${
+                      parsedFirebasePreview
+                        ? 'bg-blue-50 border-blue-200 text-[#002855]'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}
+                  >
+                    {parsedFirebasePreview ? (
+                      <div className="space-y-1">
+                        <div className="font-bold text-[#004B8D]">
+                          Đã nhận diện tự động thông số Firebase:
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono text-[11px]">
+                          <div>projectId: <strong>{parsedFirebasePreview.projectId}</strong></div>
+                          <div>authDomain: <strong>{parsedFirebasePreview.authDomain}</strong></div>
+                          <div>apiKey: <strong>{parsedFirebasePreview.apiKey.slice(0, 10)}...</strong></div>
+                          <div>appId: <strong>{parsedFirebasePreview.appId || '(tự động)'}</strong></div>
+                        </div>
+                      </div>
+                    ) : (
+                      <span>Chưa tìm thấy đầy đủ apiKey và projectId trong đoạn mã vừa dán.</span>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleSaveFirebaseSnippet}
+                    disabled={isTestingFirebase || !parsedFirebasePreview}
+                    className="flex-1 flex items-center justify-center gap-2 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold py-3 px-4 rounded-xl shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{isTestingFirebase ? 'Đang kết nối...' : 'Kết nối & Lưu'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: NO-CODE GOOGLE DRIVE ("Số hóa chứng chỉ") */}
+            {activeTab === 'drive_config' && (
+              <div className="space-y-4">
+                <div className="bg-blue-50/80 rounded-2xl p-4 border border-blue-200 text-xs text-[#002855] space-y-2">
+                  <div className="font-bold text-[#003B73] text-sm">
+                    Kết nối thư mục Google Drive ("Số hóa chứng chỉ") — Không cần cấu hình API phức tạp
+                  </div>
+                  <p className="leading-relaxed text-slate-700">
+                    Dán trực tiếp <strong>Link chia sẻ thư mục Google Drive</strong> hoặc{' '}
+                    <strong>Link Web App từ Google Apps Script</strong> vào ô dưới đây rồi bấm{' '}
+                    <strong>"Kết nối &amp; Lưu"</strong>. Khi thả thêm file Excel vào thư mục Drive, web sẽ tự động đọc toàn bộ file.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Link thư mục Google Drive hoặc Link Google Apps Script Web App:
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={driveLinkInput}
+                      onChange={(e) => setDriveLinkInput(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec  HOẶC  https://drive.google.com/drive/folders/..."
+                      className="flex-1 text-xs font-mono p-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#00529C]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveDriveConnection}
+                      disabled={isTestingAppsScript || !driveLinkInput.trim()}
+                      className="shrink-0 flex items-center justify-center gap-1.5 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-5 py-3 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isTestingAppsScript ? 'animate-spin' : ''}`} />
+                      <span>{isTestingAppsScript ? 'Đang kiểm tra...' : 'Kết nối & Lưu'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Short Copyable Google Apps Script + 3-Step Guide */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-xs">
+                        Đoạn mã Google Apps Script ngắn gọn (tự động đọc mọi file Excel trong "Số hóa chứng chỉ")
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        {savedDriveFolderId
+                          ? `Đã tự động điền Folder ID: ${savedDriveFolderId}`
+                          : 'Tự động tìm thư mục "Số hóa chứng chỉ" hoặc điền ID thư mục nếu có'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyShortScript}
+                      className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl shadow-2xs cursor-pointer shrink-0"
+                    >
+                      {copiedScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedScript ? 'Đã sao chép Script!' : 'Copy Script'}</span>
+                    </button>
+                  </div>
+
+                  <pre className="p-3.5 rounded-xl bg-slate-950 text-sky-300 font-mono text-[11px] overflow-x-auto max-h-52 leading-relaxed border border-slate-800">
+                    <code>{buildShortAppsScriptCode(savedDriveFolderId)}</code>
+                  </pre>
+
+                  <ol className="text-[11px] text-slate-600 list-decimal pl-4 space-y-1">
+                    <li>
+                      Mở <strong>script.google.com</strong> &rarr; Tạo dự án mới &rarr; Dán đoạn code trên (nếu có file <code>.xlsx</code>, bấm dấu <strong>+</strong> ở mục <em>Services</em> bên trái &rarr; chọn <strong>Drive API</strong>).
+                    </li>
+                    <li>
+                      Bấm <strong>Deploy &rarr; New deployment &rarr; Web app</strong> (Execute as: <strong>Me</strong>, Who has access: <strong>Anyone</strong>).
+                    </li>
+                    <li>
+                      Copy đường link <code>.../exec</code> dán vào ô phía trên và bấm <strong>"Kết nối &amp; Lưu"</strong>.
+                    </li>
+                  </ol>
+                </div>
+
+                {/* Optional Direct OAuth Sync */}
+                <div className="pt-1 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-xs text-slate-500">
+                    Hoặc quét trực tiếp từ Google Drive để nạp bản sao vào Cloud Firestore:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleScanDriveFolder}
+                    disabled={isScanningDrive}
+                    className="inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer disabled:opacity-50"
+                  >
+                    <FolderSync className={`w-3.5 h-3.5 ${isScanningDrive ? 'animate-spin' : ''}`} />
+                    <span>{isScanningDrive ? 'Đang quét Drive...' : 'Quét bằng tài khoản Google'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: UPLOAD EXCEL / CSV & APPEND */}
             {activeTab === 'upload' && (
               <div className="space-y-4">
                 <div
@@ -725,11 +1030,11 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                       : 'Chọn hoặc Kéo thả file Excel / CSV (.xlsx, .xls, .csv)'}
                   </h4>
                   <p className="text-xs text-slate-600 max-w-lg mx-auto leading-relaxed">
-                    Hỗ trợ chọn <strong>nhiều file cùng lúc</strong>. Hệ thống nạp tuần tự từng file, giữ nguyên dữ liệu cũ và <strong>cộng dồn (Batch Append)</strong> lên Cloud Firestore kèm thống kê thêm mới / trùng lặp MSSV.
+                    Hỗ trợ chọn <strong>nhiều file cùng lúc</strong>. Hệ thống nạp tuần tự từng file, giữ nguyên dữ liệu cũ và <strong>cộng dồn (Append)</strong> lên Cloud Firestore.
                   </p>
                   <div className="mt-3 inline-flex items-center gap-1.5 text-xs text-white font-bold bg-[#004B8D] hover:bg-[#00529C] px-4 py-2 rounded-xl shadow-xs transition-colors">
                     <Upload className="w-3.5 h-3.5" />
-                    <span>Chọn file từ máy tính</span>
+                    <span>Chọn file Excel từ máy tính</span>
                   </div>
                   <input
                     ref={fileInputRef}
@@ -741,7 +1046,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   />
                 </div>
 
-                {/* Progress Bar */}
                 {scanProgress && (
                   <div className="space-y-1.5 p-3.5 rounded-xl bg-blue-50/60 border border-blue-200">
                     <div className="flex justify-between text-xs text-[#003B73] font-semibold">
@@ -757,55 +1061,27 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   </div>
                 )}
 
-                {/* Parsing Capabilities Summary */}
-                <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 text-xs text-[#002855] space-y-1.5">
-                  <div className="flex items-center gap-1.5 font-bold text-[#003B73]">
-                    <ShieldCheck className="w-4 h-4 text-[#00529C] shrink-0" />
-                    <span>Nhận diện cột linh hoạt &amp; Nạp cộng dồn lên Cloud Firestore:</span>
-                  </div>
-                  <ul className="text-[11px] text-slate-700 space-y-1 list-disc pl-5">
-                    <li>
-                      <strong>Chỉ bỏ 01 dòng tiêu đề:</strong> Bắt đầu đọc dữ liệu ngay từ dòng kế tiếp dòng tiêu đề cột, không bỏ sót bản ghi.
-                    </li>
-                    <li>
-                      <strong>Tự động nhận diện 11+ trường thông tin:</strong> MSSV, Họ và tên người học (hoặc Họ + Tên), Ngày sinh, Nơi sinh, Giới tính, Dân tộc, Khóa học, Ngành đào tạo, Xếp loại,{' '}
-                      <strong className="text-[#004B8D]">Số hiệu văn bằng</strong>,{' '}
-                      <strong className="text-[#004B8D]">Số lưu vào sổ gốc</strong> và Ngày cấp.
-                    </li>
-                    <li>
-                      <strong>An toàn dữ liệu (Append):</strong> Không ghi đè mất dữ liệu các đợt trước; tự động cập nhật nếu trùng MSSV và cộng dồn hồ sơ mới.
-                    </li>
-                  </ul>
-                </div>
-
-                {/* Current Files Status */}
-                {syncStatus.totalRecords > 0 && (
+                {syncStatus.fileNames && syncStatus.fileNames.length > 0 && (
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-medium">Tổng chứng chỉ đang lưu trên Cloud:</span>
-                      <span className="font-mono font-bold text-[#004B8D] text-sm">
-                        {syncStatus.totalRecords.toLocaleString('vi-VN')} chứng chỉ
+                      <span className="text-slate-600 font-medium">Các đợt file đã nạp cộng dồn:</span>
+                      <span className="font-mono font-bold text-[#004B8D]">
+                        {syncStatus.fileNames.length} file
                       </span>
                     </div>
-                    {syncStatus.fileNames && syncStatus.fileNames.length > 0 && (
-                      <div className="space-y-1 pt-1 border-t border-slate-200">
-                        <span className="text-[11px] text-slate-500 font-semibold">Các file đã nạp:</span>
-                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                          {syncStatus.fileNames.map((fn, idx) => (
-                            <span
-                              key={idx}
-                              className="bg-white text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded border border-slate-200"
-                            >
-                              {fn}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                      {syncStatus.fileNames.map((fn, idx) => (
+                        <span
+                          key={idx}
+                          className="bg-white text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded border border-slate-200"
+                        >
+                          {fn}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                {/* Quick Danger Zone Link */}
                 <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center space-x-1.5 text-rose-800 font-bold text-xs">
@@ -813,7 +1089,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                       <span>Xóa dữ liệu trên Cloud Firebase</span>
                     </div>
                     <p className="text-[11px] text-slate-600 mt-0.5">
-                      Xóa từng dòng riêng lẻ ở tab <strong>2. Quản lý &amp; Xóa Dữ liệu</strong> hoặc xóa toàn bộ cơ sở dữ liệu khi cần làm mới.
+                      Xóa từng dòng ở tab <strong>4. Quản lý &amp; Xóa</strong> hoặc xóa toàn bộ khi cần làm mới.
                     </p>
                   </div>
                   <button
@@ -829,7 +1105,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               </div>
             )}
 
-            {/* TAB 2: MANAGE & DELETE INDIVIDUAL / ALL RECORDS */}
+            {/* TAB 4: MANAGE & DELETE */}
             {activeTab === 'manage' && (
               <div className="space-y-4">
                 {!isFirebaseAuthenticated && (
@@ -837,7 +1113,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                     <div className="flex items-start gap-2.5">
                       <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                       <div>
-                        <strong className="font-bold block">Yêu cầu đăng nhập Firebase Auth</strong>
+                        <strong className="font-bold block">Yêu cầu đăng nhập Google Admin</strong>
                         <span>
                           Để bảo vệ dữ liệu theo Security Rules, chỉ Cán bộ Quản trị đã đăng nhập Firebase mới được xem danh sách và xóa bản ghi trên Cloud.
                         </span>
@@ -853,7 +1129,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   </div>
                 )}
 
-                {/* Search & Refresh Bar */}
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -881,7 +1156,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   </button>
                 </form>
 
-                {/* Records Table */}
                 <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
                   <div className="overflow-x-auto max-h-72">
                     <table className="w-full text-left text-xs border-collapse">
@@ -906,7 +1180,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                             <td colSpan={5} className="py-8 text-center text-slate-400">
                               {isFirebaseAuthenticated
                                 ? 'Không có bản ghi phù hợp hoặc dữ liệu trên Cloud đang trống.'
-                                : 'Vui lòng đăng nhập Firebase Admin để xem danh sách.'}
+                                : 'Vui lòng đăng nhập Google Admin để xem danh sách.'}
                             </td>
                           </tr>
                         ) : (
@@ -929,7 +1203,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                                   type="button"
                                   onClick={() => setConfirmAction({ type: 'delete_one', record: rec })}
                                   className="inline-flex items-center space-x-1 text-rose-600 hover:text-white hover:bg-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
-                                  title={`Xóa hồ sơ ${rec.mssv}`}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                   <span>Xóa</span>
@@ -943,23 +1216,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   </div>
                 </div>
 
-                {/* Progress bar if clearing all */}
-                {scanProgress && (
-                  <div className="space-y-1.5 p-3.5 rounded-xl bg-rose-50 border border-rose-200">
-                    <div className="flex justify-between text-xs text-rose-800 font-semibold">
-                      <span>{scanProgress.message}</span>
-                      <span className="font-mono font-bold">{scanProgress.percent}%</span>
-                    </div>
-                    <div className="w-full bg-rose-200 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-rose-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${scanProgress.percent}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Danger Zone: Clear All */}
                 <div className="p-4 rounded-2xl bg-rose-50/70 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center space-x-1.5 text-rose-800 font-bold text-xs">
@@ -967,7 +1223,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                       <span>Xóa toàn bộ dữ liệu chứng chỉ trên Cloud Firebase</span>
                     </div>
                     <p className="text-[11px] text-slate-600 mt-0.5">
-                      Dọn sạch toàn bộ bản ghi trên máy chủ Cloud Firestore để nhập dữ liệu mới hoàn toàn. Không thể hoàn tác sau khi xác nhận.
+                      Dọn sạch toàn bộ bản ghi trên Cloud Firestore để nhập lại từ đầu.
                     </p>
                   </div>
                   <button
@@ -983,125 +1239,11 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
               </div>
             )}
 
-            {/* TAB 3: GOOGLE DRIVE DIRECT */}
-            {activeTab === 'drive' && (
-              <div className="space-y-4">
-                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                  <h4 className="font-bold text-slate-900 mb-1 flex items-center gap-1.5">
-                    <FolderOpen className="w-4 h-4 text-[#004B8D]" />
-                    Đường dẫn thư mục mục tiêu:
-                  </h4>
-                  <div className="font-mono text-xs text-[#003B73] bg-white p-2.5 rounded-lg border border-blue-200 font-bold">
-                    My Drive \ GDQP \ Số hóa chứng chỉ
-                  </div>
-                  <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                    Hệ thống tự động quét toàn bộ các file Excel (<code>.xlsx</code>, <code>.xls</code>) và Google Sheets trong thư mục này để đồng bộ lên Cloud Firestore.
-                  </p>
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 rounded-2xl bg-white border border-slate-200">
-                  <div className="text-xs">
-                    <div className="text-slate-500">Tài khoản Google kết nối:</div>
-                    <div className="font-bold text-slate-800 text-sm">
-                      {activeAuthEmail || 'Chưa đăng nhập'}
-                    </div>
-                  </div>
-
-                  {!isFirebaseAuthenticated ? (
-                    <button
-                      type="button"
-                      onClick={handleGoogleDriveLogin}
-                      className="flex items-center justify-center space-x-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
-                    >
-                      <span>Đăng nhập Google Drive</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleGoogleLogout}
-                      className="flex items-center justify-center space-x-1.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-2 rounded-xl transition-all font-semibold cursor-pointer"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Đăng xuất</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={handleScanDriveFolder}
-                    disabled={isScanningDrive}
-                    className="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-[#003B73] to-[#00529C] hover:from-[#004B8D] hover:to-[#0066B3] text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-60"
-                  >
-                    <FolderSync className={`w-5 h-5 ${isScanningDrive ? 'animate-spin' : ''}`} />
-                    <span>
-                      {isScanningDrive
-                        ? 'Đang quét và số hóa dữ liệu...'
-                        : 'Quét Thư Mục "GDQP / Số hóa chứng chỉ"'}
-                    </span>
-                  </button>
-
-                  {scanProgress && (
-                    <div className="mt-3 space-y-1.5">
-                      <div className="flex justify-between text-xs text-slate-500">
-                        <span>{scanProgress.message}</span>
-                        <span className="font-mono font-bold text-[#004B8D]">{scanProgress.percent}%</span>
-                      </div>
-                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                        <div
-                          className="bg-[#004B8D] h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${scanProgress.percent}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 4: GOOGLE APPS SCRIPT API */}
-            {activeTab === 'appsscript' && (
-              <div className="space-y-4">
-                <div className="bg-blue-50/70 rounded-2xl p-4 border border-blue-200 text-xs text-[#002855] leading-relaxed">
-                  <strong className="block font-bold text-[#003B73] mb-1">
-                    Kết nối Google Apps Script Web App (Tùy chọn bổ sung):
-                  </strong>
-                  Ngoài lưu trữ trực tiếp trên Cloud Firestore, bạn có thể kết nối thêm endpoint Google Apps Script để tra cứu trực tiếp từ Google Drive.
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Đường dẫn Web App URL:
-                  </label>
-                  <input
-                    type="url"
-                    value={appsScriptUrlInput}
-                    onChange={(e) => setAppsScriptUrlInput(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
-                    className="w-full text-xs font-mono p-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#00529C]"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={handleSaveAppsScriptUrl}
-                    disabled={isTestingAppsScript || !appsScriptUrlInput.trim()}
-                    className="flex-1 flex items-center justify-center space-x-1.5 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold py-2.5 px-4 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${isTestingAppsScript ? 'animate-spin' : ''}`} />
-                    <span>{isTestingAppsScript ? 'Đang kiểm tra...' : 'Kiểm tra & Lưu kết nối'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* TAB 5: DEMO DATASET */}
             {activeTab === 'demo' && (
               <div className="space-y-4">
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Khôi phục lại dữ liệu mẫu chuẩn của Đại học Cần Thơ để kiểm tra giao diện tra cứu và tốc độ phản hồi:
+                  Khôi phục lại dữ liệu mẫu chuẩn của Đại học Cần Thơ để kiểm tra giao diện tra cứu:
                 </p>
 
                 <div className="grid grid-cols-2 gap-2 text-xs font-mono">
@@ -1114,16 +1256,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                     <div className="text-slate-400 text-[10px]">MSSV:</div>
                     <strong className="text-slate-800">B2105678</strong>
                     <div className="text-[#004B8D] text-[11px] mt-0.5">Sổ gốc: 891/2025/GDQP</div>
-                  </div>
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                    <div className="text-slate-400 text-[10px]">MSSV:</div>
-                    <strong className="text-slate-800">B2209999</strong>
-                    <div className="text-[#004B8D] text-[11px] mt-0.5">Sổ gốc: 1024/2025/GDQP</div>
-                  </div>
-                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                    <div className="text-slate-400 text-[10px]">MSSV:</div>
-                    <strong className="text-slate-800">B2012001</strong>
-                    <div className="text-[#004B8D] text-[11px] mt-0.5">Sổ gốc: 115/2025/GDQP</div>
                   </div>
                 </div>
 
@@ -1142,8 +1274,10 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
           {/* Footer */}
           <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
             <div className="text-xs text-slate-500">
-              Hệ thống đồng bộ thời gian thực{' '}
-              <span className="font-mono font-bold text-[#004B8D]">Cloud Firestore</span>
+              Đại học Cần Thơ —{' '}
+              <span className="font-mono font-bold text-[#004B8D]">
+                {currentMode === 'drive' ? 'Chế độ 2: Google Drive' : 'Chế độ 1: Firebase Cloud'}
+              </span>
             </div>
             <button
               type="button"
@@ -1156,7 +1290,6 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         </div>
       </div>
 
-      {/* Confirm Modal for single-row or full delete */}
       <ConfirmModal
         isOpen={confirmAction !== null}
         title={
@@ -1166,8 +1299,8 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         }
         message={
           confirmAction?.type === 'delete_one'
-            ? `Bạn có chắc chắn muốn xóa vĩnh viễn chứng chỉ của sinh viên "${confirmAction.record.hoVaTen}" (MSSV: ${confirmAction.record.mssv}, Số vào sổ gốc: ${confirmAction.record.soVaoSoGoc || '—'}) khỏi Cloud Firestore?`
-            : 'CẢNH BÁO: Thao tác này sẽ xóa vĩnh viễn TOÀN BỘ danh sách chứng chỉ đang lưu trên Cloud Firestore và đưa hệ thống về 0 bản ghi.\n\nHành động này không thể hoàn tác. Bạn có chắc chắn muốn tiếp tục?'
+            ? `Bạn có chắc chắn muốn xóa vĩnh viễn chứng chỉ của sinh viên "${confirmAction.record.hoVaTen}" (MSSV: ${confirmAction.record.mssv}) khỏi Cloud Firestore?`
+            : 'CẢNH BÁO: Thao tác này sẽ xóa vĩnh viễn TOÀN BỘ danh sách chứng chỉ đang lưu trên Cloud Firestore. Không thể hoàn tác!'
         }
         confirmLabel={confirmAction?.type === 'delete_one' ? 'Xóa bản ghi này' : 'Xóa toàn bộ dữ liệu'}
         variant="danger"

@@ -4,9 +4,21 @@ import { INITIAL_DEMO_RECORDS } from './mockData';
 const STORAGE_KEY_RECORDS = 'gdqp_certificate_records_v1';
 const STORAGE_KEY_STATUS = 'gdqp_sync_status_v1';
 const STORAGE_KEY_APPS_SCRIPT_URL = 'gdqp_apps_script_url_v1';
+const STORAGE_KEY_DRIVE_FOLDER_URL = 'gdqp_drive_folder_url_v1';
 
 // In-memory index: normalized MSSV -> CertificateRecord
 const recordsIndex = new Map<string, CertificateRecord>();
+
+function normalizeSearchText(str: string): string {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function getSavedAppsScriptUrl(): string {
   try {
@@ -24,6 +36,38 @@ export function saveAppsScriptUrl(url: string): void {
   }
 }
 
+export function getSavedDriveFolderUrl(): string {
+  try {
+    return localStorage.getItem(STORAGE_KEY_DRIVE_FOLDER_URL) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveDriveFolderUrl(url: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_DRIVE_FOLDER_URL, url.trim());
+  } catch (e) {
+    console.error('Không thể lưu Drive Folder URL:', e);
+  }
+}
+
+/**
+ * Trích xuất Folder ID từ link chia sẻ Google Drive (hoặc trả về nguyên ID nếu người dùng dán thẳng ID)
+ */
+export function extractDriveFolderId(input: string): string {
+  const clean = input.trim();
+  if (!clean) return '';
+  const folderMatch = clean.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch) return folderMatch[1];
+  const idMatch = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch) return idMatch[1];
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(clean) && !clean.includes('http')) {
+    return clean;
+  }
+  return '';
+}
+
 export function getSyncStatus(): SyncStatus {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_STATUS);
@@ -34,7 +78,6 @@ export function getSyncStatus(): SyncStatus {
     console.error('Lỗi đọc sync status:', e);
   }
 
-  // Default fallback status with demo data
   return {
     source: 'demo_data',
     totalRecords: INITIAL_DEMO_RECORDS.length,
@@ -53,6 +96,25 @@ export function saveSyncStatus(status: SyncStatus): void {
   }
 }
 
+export function switchDataSourceMode(mode: 'firebase' | 'drive'): SyncStatus {
+  const current = getSyncStatus();
+  const nextSource: DataSourceType =
+    mode === 'drive'
+      ? 'apps_script'
+      : current.totalRecords > 0 && current.source !== 'demo_data'
+      ? 'local_excel'
+      : 'local_excel';
+
+  const updated: SyncStatus = {
+    ...current,
+    source: nextSource,
+    appsScriptUrl: getSavedAppsScriptUrl(),
+    lastUpdated: new Date().toLocaleString('vi-VN'),
+  };
+  saveSyncStatus(updated);
+  return updated;
+}
+
 export function initStorage(): CertificateRecord[] {
   recordsIndex.clear();
   let loadedRecords: CertificateRecord[] = [];
@@ -66,13 +128,11 @@ export function initStorage(): CertificateRecord[] {
     console.warn('Lỗi parse records từ LocalStorage:', e);
   }
 
-  // If empty, seed with authentic demo records
   if (!loadedRecords || loadedRecords.length === 0) {
     loadedRecords = [...INITIAL_DEMO_RECORDS];
     saveRecords(loadedRecords, 'demo_data', ['So_hoa_GDQP_K47_Dot1.xlsx', 'So_hoa_GDQP_K48_Dot2.xlsx']);
   }
 
-  // Build high-speed Map
   for (const record of loadedRecords) {
     if (record.mssv) {
       recordsIndex.set(record.mssv.trim().toUpperCase(), record);
@@ -94,13 +154,11 @@ export function saveRecords(
     }
   }
 
-  // Only store up to 1,500 records in LocalStorage as lightweight offline cache
-  // Prevents browser thread freeze when handling 50,000 - 100,000 records
   try {
     const cacheSubset = records.slice(0, 1500);
     localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(cacheSubset));
   } catch {
-    // Graceful fallback: Cloud Firestore is the persistent source of truth
+    // Graceful fallback
   }
 
   saveSyncStatus({
@@ -113,16 +171,10 @@ export function saveRecords(
   });
 }
 
-/**
- * Get all loaded records as array
- */
 export function getAllLoadedRecords(): CertificateRecord[] {
   return Array.from(recordsIndex.values());
 }
 
-/**
- * Append or update new records into local storage and index
- */
 export function appendRecords(
   newRecords: CertificateRecord[],
   source: DataSourceType,
@@ -139,7 +191,6 @@ export function appendRecords(
     }
   }
 
-  // Safely update lightweight LocalStorage cache without freezing UI
   try {
     if (recordsIndex.size <= 1500) {
       const allRecords = Array.from(recordsIndex.values());
@@ -149,7 +200,7 @@ export function appendRecords(
       localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(recentSubset));
     }
   } catch {
-    // Quota reached, safe to ignore since Cloud Firestore holds the 100k database
+    // Quota reached
   }
 
   const currentStatus = getSyncStatus();
@@ -168,9 +219,6 @@ export function appendRecords(
   return { total: recordsIndex.size, added };
 }
 
-/**
- * Clear all locally stored records
- */
 export function clearAllLocalRecords(): void {
   recordsIndex.clear();
   try {
@@ -180,7 +228,7 @@ export function clearAllLocalRecords(): void {
   }
 
   saveSyncStatus({
-    source: 'demo_data',
+    source: 'local_excel',
     totalRecords: 0,
     lastUpdated: new Date().toLocaleString('vi-VN'),
     fileCount: 0,
@@ -189,18 +237,12 @@ export function clearAllLocalRecords(): void {
   });
 }
 
-/**
- * Cache an individual record into memory index
- */
 export function cacheRecord(record: CertificateRecord): void {
   if (record && record.mssv) {
     recordsIndex.set(record.mssv.trim().toUpperCase(), record);
   }
 }
 
-/**
- * Remove a single record from local cache and update status count
- */
 export function removeLocalRecord(mssv: string, newCloudTotal?: number): void {
   if (!mssv) return;
   const cleanMssv = mssv.trim().toUpperCase();
@@ -210,7 +252,7 @@ export function removeLocalRecord(mssv: string, newCloudTotal?: number): void {
     const subset = Array.from(recordsIndex.values()).slice(-1500);
     localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(subset));
   } catch {
-    // ignore quota error
+    // ignore
   }
 
   const currentStatus = getSyncStatus();
@@ -223,7 +265,6 @@ export function removeLocalRecord(mssv: string, newCloudTotal?: number): void {
 
 /**
  * 100% Exact match lookup by MSSV (< 1ms)
- * Automatically trims whitespace and capitalizes query
  */
 export function lookupByMssv(mssv: string): CertificateRecord | null {
   if (!mssv) return null;
@@ -232,15 +273,32 @@ export function lookupByMssv(mssv: string): CertificateRecord | null {
 }
 
 /**
- * Get all loaded records count
+ * Tìm kiếm theo MSSV hoặc Họ và tên (không phân biệt dấu)
  */
+export function lookupByMssvOrName(queryText: string): CertificateRecord[] {
+  const raw = queryText.trim();
+  if (!raw) return [];
+
+  const exactMssv = recordsIndex.get(raw.toUpperCase());
+  if (exactMssv) return [exactMssv];
+
+  const normQuery = normalizeSearchText(raw);
+  const matches: CertificateRecord[] = [];
+  for (const rec of recordsIndex.values()) {
+    const normName = normalizeSearchText(rec.hoVaTen || '');
+    const normMssv = normalizeSearchText(rec.mssv || '');
+    if (normMssv === normQuery || normName.includes(normQuery)) {
+      matches.push(rec);
+    }
+    if (matches.length >= 20) break;
+  }
+  return matches;
+}
+
 export function getLoadedCount(): number {
   return recordsIndex.size;
 }
 
-/**
- * Reset back to initial demo dataset
- */
 export function resetToDemo(): CertificateRecord[] {
   saveRecords(
     INITIAL_DEMO_RECORDS,

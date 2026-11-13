@@ -245,9 +245,11 @@ export function parseExcelFile(
         else if (norm.includes('so hieu') || norm.includes('so van bang') || norm.includes('so vb')) {
           if (currentMap.soHieu === undefined) { currentMap.soHieu = colIdx; rowMatches++; }
         }
-        // 7. Số vào sổ gốc / Số quản lý (hỗ trợ "Số vào sổ gốc cấp chứng chỉ", "Sốvào sổ", "Số vào sổ")
+        // 7. Số vào sổ gốc / Số lưu vào sổ gốc / Số quản lý
         else if (
           norm.includes('so vao so') ||
+          norm.includes('luu vao so') ||
+          norm.includes('so luu') ||
           norm.includes('sovao so') ||
           norm.includes('so vaoso') ||
           norm.includes('sovaoso') ||

@@ -16,7 +16,10 @@ import {
   toggleHistoryDaPhat,
   deleteHistoryItem,
   clearAllSearchHistory,
+  isQuotaExceededError,
+  QUOTA_EXCEEDED_VI_MESSAGE,
 } from '../services/firestoreService';
+import { auth, googleSignInAdmin } from '../services/firebaseAuth';
 import { ConfirmModal } from './ConfirmModal';
 import * as XLSX from 'xlsx';
 
@@ -36,6 +39,7 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
   const [isClearing, setIsClearing] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isFirebaseSignedIn, setIsFirebaseSignedIn] = useState<boolean>(Boolean(auth.currentUser));
 
   // Confirm modal state (replaces window.confirm)
   const [confirmState, setConfirmState] = useState<{
@@ -47,6 +51,13 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     setErrorMsg(null);
+    const signedIn = Boolean(auth.currentUser);
+    setIsFirebaseSignedIn(signedIn);
+
+    if (!signedIn) {
+      setHistoryItems([]);
+      return;
+    }
 
     const unsubscribe = subscribeSearchHistory(
       (items) => {
@@ -54,16 +65,29 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
       },
       150,
       () => {
-        setErrorMsg('Cần đăng nhập tài khoản Firebase Cán bộ Quản trị để xem và cập nhật lịch sử tra cứu trực tiếp.');
+        setErrorMsg(
+          'Tài khoản hiện tại chưa được cấp quyền xem lịch sử trên Firestore Rules. Vui lòng đăng nhập bằng tài khoản Google Cán bộ Quản trị.'
+        );
       }
     );
 
     return () => {
       unsubscribe();
     };
-  }, [isOpen]);
+  }, [isOpen, isFirebaseSignedIn]);
 
   if (!isOpen) return null;
+
+  const handleQuickGoogleLogin = async () => {
+    setErrorMsg(null);
+    try {
+      await googleSignInAdmin();
+      setIsFirebaseSignedIn(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi đăng nhập Google';
+      setErrorMsg(`Đăng nhập thất bại: ${msg}`);
+    }
+  };
 
   const handleToggleDaPhat = async (item: SearchHistoryItem) => {
     setIsUpdatingId(item.id);
@@ -76,8 +100,12 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
           : `Đã xác nhận phát chứng chỉ cho sinh viên ${item.hoVaTen} (${item.mssv})!`
       );
       setTimeout(() => setFeedbackMsg(null), 3000);
-    } catch {
-      setErrorMsg('Không thể cập nhật trạng thái. Vui lòng đảm bảo bạn đã đăng nhập tài khoản Firebase Cán bộ.');
+    } catch (err: unknown) {
+      if (isQuotaExceededError(err)) {
+        setErrorMsg(QUOTA_EXCEEDED_VI_MESSAGE);
+      } else {
+        setErrorMsg('Không thể cập nhật trạng thái. Vui lòng đảm bảo bạn đã đăng nhập tài khoản Firebase Cán bộ.');
+      }
     } finally {
       setIsUpdatingId(null);
     }
@@ -96,8 +124,12 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
         setFeedbackMsg('Đã làm trống toàn bộ lịch sử tra cứu.');
       }
       setTimeout(() => setFeedbackMsg(null), 3000);
-    } catch {
-      setErrorMsg('Không đủ quyền xóa lịch sử. Vui lòng đăng nhập tài khoản Firebase Cán bộ.');
+    } catch (err: unknown) {
+      if (isQuotaExceededError(err)) {
+        setErrorMsg(QUOTA_EXCEEDED_VI_MESSAGE);
+      } else {
+        setErrorMsg('Không đủ quyền xóa lịch sử. Vui lòng đăng nhập tài khoản Firebase Cán bộ.');
+      }
     } finally {
       setIsClearing(false);
       setConfirmState(null);
@@ -236,6 +268,24 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
               </button>
             </div>
           </div>
+
+          {!isFirebaseSignedIn && (
+            <div className="mx-6 mt-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  Cần đăng nhập tài khoản <strong>Google Cán bộ Quản trị</strong> để tải và cập nhật lịch sử phát bằng từ Cloud Firestore.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleQuickGoogleLogin}
+                className="shrink-0 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-3.5 py-2 rounded-xl text-xs cursor-pointer transition-colors"
+              >
+                Đăng nhập Google Admin
+              </button>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="mx-6 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center space-x-2">

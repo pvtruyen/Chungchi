@@ -41,7 +41,7 @@ service cloud.firestore {
     function isBootstrappedAdmin() {
       return isSignedIn()
         && request.auth.token.email_verified == true
-        && request.auth.token.email == 'pvtruyen@ctu.edu.vn'; // Thay bằng Email Cán bộ Admin của bạn
+        && request.auth.token.email.lower() == 'pvtruyen@ctu.edu.vn'; // Thay bằng Email Cán bộ Admin của bạn
     }
 
     function isAdmin() {
@@ -53,7 +53,7 @@ service cloud.firestore {
     // 1. Chứng chỉ: Khách chỉ được get từng MSSV; Admin được list, create, update, delete
     match /gdqp_certificates/{mssv} {
       allow get: if isValidId(mssv);
-      allow list: if isBootstrappedAdmin() && resource.data.mssv is string;
+      allow list: if isBootstrappedAdmin() && resource.data.mssv >= '';
       allow create, update: if isAdmin() && isValidId(mssv);
       allow delete: if isAdmin() && isValidId(mssv);
     }
@@ -61,14 +61,14 @@ service cloud.firestore {
     // 2. Siêu dữ liệu đồng bộ
     match /gdqp_meta/{metaId} {
       allow get: if isValidId(metaId);
-      allow list: if isBootstrappedAdmin() && resource.data.source is string;
+      allow list: if isBootstrappedAdmin() && resource.data.source >= '';
       allow create, update, delete: if isAdmin() && isValidId(metaId);
     }
 
     // 3. Lịch sử tra cứu: Khách được tạo log tra cứu; chỉ Admin xem, cập nhật đã phát & xóa
     match /gdqp_search_history/{historyId} {
       allow get: if isAdmin() && isValidId(historyId);
-      allow list: if isBootstrappedAdmin() && resource.data.mssv is string;
+      allow list: if isBootstrappedAdmin() && resource.data.mssv >= '';
       allow create: if isValidId(historyId) && request.resource.data.daPhat == false;
       allow update: if isAdmin() && isValidId(historyId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['daPhat', 'ngayPhat']);
@@ -242,13 +242,25 @@ git push -u origin main`;
           {/* TAB 1: FIREBASE SETUP & SECURITY RULES */}
           {activeTab === 'firebase_setup' && (
             <div className="space-y-5">
+              <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-950 space-y-1.5 leading-relaxed">
+                <strong className="font-bold text-emerald-900 text-sm flex items-center gap-1.5">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  Đã tự động tạo &amp; kết nối sẵn Cloud Firestore trên ứng dụng này!
+                </strong>
+                <p>
+                  Ứng dụng hiện tại đã được kết nối tự động tới cơ sở dữ liệu Cloud Firestore qua tệp{' '}
+                  <code>firebase-applet-config.json</code>. Bạn có thể tra cứu, nạp Excel và xem lịch sử ngay lập tức mà{' '}
+                  <strong>không cần điền thêm cấu hình</strong>.
+                </p>
+              </div>
+
               <div className="bg-blue-50/80 border border-blue-200 rounded-2xl p-4 text-xs text-[#002855] space-y-2 leading-relaxed">
                 <strong className="font-bold text-[#003B73] text-sm block">
-                  Quy trình 4 bước cấu hình Firebase cho Website riêng của đơn vị:
+                  Chỉ cần thay thế 3 thông tin sau NẾU bạn tự deploy lên dự án Firebase riêng của đơn vị:
                 </strong>
-                <ol className="list-decimal pl-5 space-y-1">
+                <ol className="list-decimal pl-5 space-y-1.5">
                   <li>
-                    Truy cập{' '}
+                    <strong>Thông số kết nối <code>firebaseConfig</code>:</strong> Tạo dự án tại{' '}
                     <a
                       href="https://console.firebase.google.com/"
                       target="_blank"
@@ -257,16 +269,16 @@ git push -u origin main`;
                     >
                       Firebase Console <ExternalLink className="w-3 h-3" />
                     </a>{' '}
-                    &rarr; Tạo dự án mới (Create a project) &rarr; Bật <strong>Firestore Database</strong> (chế độ Production) &rarr; Bật <strong>Authentication</strong> (chọn Google và Email/Password).
+                    &rarr; Bật <strong>Firestore Database</strong> &amp; <strong>Authentication</strong> (Google, Email/Password) &rarr; Điền 6 giá trị (<code>apiKey</code>, <code>authDomain</code>, <code>projectId</code>, <code>storageBucket</code>, <code>messagingSenderId</code>, <code>appId</code>) vào biến môi trường <code>VITE_FIREBASE_*</code> trên Vercel hoặc thay trực tiếp trong <code>firebase-applet-config.json</code>.
                   </li>
                   <li>
-                    Vào <strong>Project Settings &rarr; Your apps &rarr; Web (&lt;/&gt;)</strong> để lấy đoạn mã <code>firebaseConfig</code> (hoặc điền vào biến môi trường <code>VITE_FIREBASE_*</code> trên Vercel).
+                    <strong>Email Cán bộ Quản trị trong <code>firestore.rules</code>:</strong> Mở tab{' '}
+                    <strong>Firestore Database &rarr; Rules</strong>, thay dòng{' '}
+                    <code>pvtruyen@ctu.edu.vn</code> thành Email Google chính thức của cán bộ phụ trách và nhấn <strong>Publish</strong>.
                   </li>
                   <li>
-                    Vào mục <strong>Authentication &rarr; Settings &rarr; Authorized domains</strong> và thêm tên miền Vercel / GitHub Pages của bạn (VD: <code>gdqp-ctu.vercel.app</code>).
-                  </li>
-                  <li>
-                    Vào mục <strong>Firestore Database &rarr; Rules</strong>, thay email Admin thành email cán bộ của bạn rồi dán bộ <strong>Security Rules</strong> chuẩn bên dưới và nhấn <strong>Publish</strong>.
+                    <strong>Tên miền được phép đăng nhập (Authorized domains):</strong> Trong{' '}
+                    <strong>Authentication &rarr; Settings &rarr; Authorized domains</strong>, bấm <strong>Add domain</strong> và thêm tên miền Vercel / GitHub Pages của bạn (VD: <code>gdqp-ctu.vercel.app</code>).
                   </li>
                 </ol>
               </div>

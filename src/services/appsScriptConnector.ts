@@ -10,15 +10,18 @@ export interface AppsScriptResponse {
 }
 
 /**
- * Query a deployed Google Apps Script Web App endpoint by MSSV
+ * Query a deployed Google Apps Script Web App endpoint by MSSV or Student Name
  */
 export async function queryAppsScript(
   webAppUrl: string,
-  mssv: string
+  searchQuery: string
 ): Promise<AppsScriptResponse> {
-  const cleanMssv = mssv.trim().toUpperCase();
+  const cleanQuery = searchQuery.trim();
   const separator = webAppUrl.includes('?') ? '&' : '?';
-  const queryUrl = `${webAppUrl}${separator}mssv=${encodeURIComponent(cleanMssv)}`;
+  const queryUrl =
+    cleanQuery === 'TEST_PING'
+      ? `${webAppUrl}${separator}action=ping`
+      : `${webAppUrl}${separator}mssv=${encodeURIComponent(cleanQuery)}&q=${encodeURIComponent(cleanQuery)}`;
 
   try {
     const res = await fetch(queryUrl, {

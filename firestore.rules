@@ -27,7 +27,7 @@ service cloud.firestore {
     function isBootstrappedAdmin() {
       return isSignedIn()
         && request.auth.token.email_verified == true
-        && request.auth.token.email == 'pvtruyen@ctu.edu.vn';
+        && request.auth.token.email.lower() == 'pvtruyen@ctu.edu.vn';
     }
 
     // Admin đầy đủ: Bootstrapped Admin HOẶC UID nằm trong collection /admins
@@ -117,7 +117,7 @@ service cloud.firestore {
     // Cán bộ quản trị (Admin) mới được duyệt danh sách (list), thêm/sửa/cộng dồn (write) và xóa (delete).
     match /gdqp_certificates/{mssv} {
       allow get: if isValidId(mssv);
-      allow list: if isBootstrappedAdmin() && resource.data.mssv is string;
+      allow list: if isBootstrappedAdmin() && resource.data.mssv >= '';
       allow create, update: if isAdmin() && isValidId(mssv) && isValidCertificate(incoming());
       allow delete: if isAdmin() && isValidId(mssv);
     }
@@ -125,7 +125,7 @@ service cloud.firestore {
     // 2. Siêu dữ liệu đồng bộ (tổng số bản ghi, ngày cập nhật)
     match /gdqp_meta/{metaId} {
       allow get: if isValidId(metaId);
-      allow list: if isBootstrappedAdmin() && resource.data.source is string;
+      allow list: if isBootstrappedAdmin() && resource.data.source >= '';
       allow create, update: if isAdmin() && isValidId(metaId) && isValidSyncMeta(incoming());
       allow delete: if isAdmin() && isValidId(metaId);
     }
@@ -134,7 +134,7 @@ service cloud.firestore {
     // chỉ Cán bộ Admin mới được xem lịch sử, đánh dấu đã phát, hoặc xóa.
     match /gdqp_search_history/{historyId} {
       allow get: if isAdmin() && isValidId(historyId);
-      allow list: if isBootstrappedAdmin() && resource.data.mssv is string;
+      allow list: if isBootstrappedAdmin() && resource.data.mssv >= '';
       allow create: if isValidId(historyId) && isValidSearchHistory(incoming()) && incoming().daPhat == false;
       allow update: if isAdmin()
         && isValidId(historyId)

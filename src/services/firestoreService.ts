@@ -23,6 +23,29 @@ const COLLECTION_META = 'gdqp_meta';
 const COLLECTION_HISTORY = 'gdqp_search_history';
 const DOC_STATUS = 'status';
 
+export const FIRESTORE_QUOTA_CONSOLE_URL =
+  'https://console.firebase.google.com/project/gen-lang-client-0366484892/firestore/databases/ai-studio-tracuchngchgdqpa-66e93f04-989f-486c-ac2f-e76374fe18b0/data?openUpgradeDialog=true';
+
+let writeQuotaExhaustedInSession = false;
+
+export function isQuotaExceededError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const code = (error as { code?: string } | null)?.code?.toLowerCase() || '';
+  return (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('quota exceeded') ||
+    msg.includes('quota limit exceeded')
+  );
+}
+
+export function hasFirestoreWriteQuotaExceeded(): boolean {
+  return writeQuotaExhaustedInSession;
+}
+
+export const QUOTA_EXCEEDED_VI_MESSAGE =
+  'Đã vượt giới hạn lượt ghi miễn phí trong ngày (Free daily write units) của cơ sở dữ liệu Firestore. Hạn mức sẽ tự động đặt lại vào ngày mai. Dữ liệu tra cứu đã lưu trước đó vẫn hoạt động bình thường.';
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -160,7 +183,13 @@ export async function fetchCertificatesForAdmin(
           orderBy('mssv'),
           limit(limitCount)
         )
-      : query(colRef, where('mssv', '>=', ''), orderBy('mssv'), limit(limitCount));
+      : query(
+          colRef,
+          where('mssv', '>=', ''),
+          where('mssv', '<=', '\uf8ff'),
+          orderBy('mssv'),
+          limit(limitCount)
+        );
 
     const snap = await getDocs(q);
     return snap.docs.map((d) => d.data() as CertificateRecord);
@@ -173,7 +202,11 @@ export async function fetchCertificatesForAdmin(
  * Đếm tổng số chứng chỉ hiện có trên Cloud bằng aggregation server (cực nhanh)
  */
 async function countCertificatesOnCloud(): Promise<number> {
-  const q = query(collection(db, COLLECTION_CERTIFICATES), where('mssv', '>=', ''));
+  const q = query(
+    collection(db, COLLECTION_CERTIFICATES),
+    where('mssv', '>=', ''),
+    where('mssv', '<=', '\uf8ff')
+  );
   const snap = await getCountFromServer(q);
   return snap.data().count;
 }
@@ -215,10 +248,22 @@ async function commitBatchesWithConcurrency(
     batches.push({ batch, count: chunk.length });
   }
 
+  if (writeQuotaExhaustedInSession) {
+    throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+  }
+
   let uploaded = 0;
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     const group = batches.slice(i, i + CONCURRENCY);
-    await Promise.all(group.map((g) => g.batch.commit()));
+    try {
+      await Promise.all(group.map((g) => g.batch.commit()));
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        writeQuotaExhaustedInSession = true;
+        throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+      }
+      throw err;
+    }
     uploaded += group.reduce((sum, g) => sum + g.count, 0);
 
     const pct = Math.min(95, Math.round((uploaded / total) * 90));
@@ -273,6 +318,10 @@ export async function saveRecordsToCloud(
 
     return { success: true, totalUploaded: uploaded };
   } catch (err: unknown) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      return { success: false, totalUploaded: 0, error: QUOTA_EXCEEDED_VI_MESSAGE };
+    }
     try {
       handleFirestoreError(err, OperationType.WRITE, COLLECTION_CERTIFICATES);
     } catch (formattedErr: unknown) {
@@ -368,6 +417,17 @@ export async function appendRecordsToCloud(
       totalInCloud,
     };
   } catch (err: unknown) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      return {
+        success: false,
+        totalUploaded: 0,
+        newlyAddedCount: 0,
+        updatedDuplicateCount: 0,
+        totalInCloud: 0,
+        error: QUOTA_EXCEEDED_VI_MESSAGE,
+      };
+    }
     const rawMsg = err instanceof Error ? err.message : String(err);
     const isPermError = rawMsg.toLowerCase().includes('permission') || rawMsg.toLowerCase().includes('insufficient');
     const friendlyError = isPermError
@@ -416,6 +476,10 @@ export async function deleteRecordFromCloud(mssv: string): Promise<{ success: bo
 
     return { success: true, totalInCloud };
   } catch (err: unknown) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      return { success: false, totalInCloud: 0, error: QUOTA_EXCEEDED_VI_MESSAGE };
+    }
     const rawMsg = err instanceof Error ? err.message : String(err);
     const isPermError = rawMsg.toLowerCase().includes('permission') || rawMsg.toLowerCase().includes('insufficient');
     return {
@@ -434,9 +498,18 @@ export async function deleteRecordFromCloud(mssv: string): Promise<{ success: bo
 export async function clearAllCertificatesFromCloud(
   onProgress?: (message: string, percent: number) => void
 ): Promise<{ success: boolean; error?: string }> {
+  if (writeQuotaExhaustedInSession) {
+    return { success: false, error: QUOTA_EXCEEDED_VI_MESSAGE };
+  }
   try {
     if (onProgress) onProgress('Đang tải danh sách tài liệu cần xóa trên Cloud...', 10);
-    const snap = await getDocs(query(collection(db, COLLECTION_CERTIFICATES), where('mssv', '>=', '')));
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTION_CERTIFICATES),
+        where('mssv', '>=', ''),
+        where('mssv', '<=', '\uf8ff')
+      )
+    );
     const total = snap.docs.length;
 
     if (total > 0) {
@@ -479,6 +552,10 @@ export async function clearAllCertificatesFromCloud(
     if (onProgress) onProgress('Đã xóa sạch toàn bộ danh sách chứng chỉ trên Cloud Firebase!', 100);
     return { success: true };
   } catch (err: unknown) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      return { success: false, error: QUOTA_EXCEEDED_VI_MESSAGE };
+    }
     const rawMsg = err instanceof Error ? err.message : String(err);
     const isPermError = rawMsg.toLowerCase().includes('permission') || rawMsg.toLowerCase().includes('insufficient');
     console.error('Lỗi xóa Firestore:', err);
@@ -495,9 +572,14 @@ export async function clearAllCertificatesFromCloud(
  * Khởi tạo dữ liệu mẫu lên Cloud (chỉ gọi khi Cán bộ Admin yêu cầu hoặc collection rỗng)
  */
 export async function seedCloudIfEmpty(): Promise<boolean> {
-  if (!auth.currentUser) return false;
+  if (!auth.currentUser || writeQuotaExhaustedInSession) return false;
   try {
-    const q = query(collection(db, COLLECTION_CERTIFICATES), where('mssv', '>=', ''), limit(1));
+    const q = query(
+      collection(db, COLLECTION_CERTIFICATES),
+      where('mssv', '>=', ''),
+      where('mssv', '<=', '\uf8ff'),
+      limit(1)
+    );
     const snap = await getDocs(q);
 
     if (snap.empty) {
@@ -569,9 +651,17 @@ export async function recordSearchEvent(
         status: 'not_found',
       };
 
+  if (writeQuotaExhaustedInSession) {
+    return;
+  }
   try {
     await setDoc(doc(db, COLLECTION_HISTORY, id), historyItem);
   } catch (err) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      console.warn('Firestore daily write quota exceeded; skipping search history log for this session.');
+      return;
+    }
     console.warn('Lỗi lưu lịch sử tra cứu lên Firestore:', err);
   }
 }
@@ -588,6 +678,7 @@ export function subscribeSearchHistory(
     const q = query(
       collection(db, COLLECTION_HISTORY),
       where('mssv', '>=', ''),
+      where('mssv', '<=', '\uf8ff'),
       orderBy('mssv'),
       limit(limitCount)
     );
@@ -618,6 +709,9 @@ export function subscribeSearchHistory(
  * Chuyển đổi trạng thái "Đã phát chứng chỉ"
  */
 export async function toggleHistoryDaPhat(historyId: string, currentStatus: boolean): Promise<void> {
+  if (writeQuotaExhaustedInSession) {
+    throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+  }
   try {
     const docRef = doc(db, COLLECTION_HISTORY, historyId);
     const now =
@@ -629,6 +723,10 @@ export async function toggleHistoryDaPhat(historyId: string, currentStatus: bool
       ngayPhat: !currentStatus ? now : null,
     });
   } catch (err) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+    }
     handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_HISTORY}/${historyId}`);
   }
 }
@@ -637,9 +735,16 @@ export async function toggleHistoryDaPhat(historyId: string, currentStatus: bool
  * Xóa 1 dòng lịch sử tra cứu
  */
 export async function deleteHistoryItem(historyId: string): Promise<void> {
+  if (writeQuotaExhaustedInSession) {
+    throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+  }
   try {
     await deleteDoc(doc(db, COLLECTION_HISTORY, historyId));
   } catch (err) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+    }
     handleFirestoreError(err, OperationType.DELETE, `${COLLECTION_HISTORY}/${historyId}`);
   }
 }
@@ -648,12 +753,25 @@ export async function deleteHistoryItem(historyId: string): Promise<void> {
  * Xóa toàn bộ lịch sử tra cứu
  */
 export async function clearAllSearchHistory(): Promise<void> {
+  if (writeQuotaExhaustedInSession) {
+    throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+  }
   try {
-    const snap = await getDocs(query(collection(db, COLLECTION_HISTORY), where('mssv', '>=', '')));
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTION_HISTORY),
+        where('mssv', '>=', ''),
+        where('mssv', '<=', '\uf8ff')
+      )
+    );
     const batch = writeBatch(db);
     snap.forEach((d) => batch.delete(d.ref));
     await batch.commit();
   } catch (err) {
+    if (isQuotaExceededError(err)) {
+      writeQuotaExhaustedInSession = true;
+      throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+    }
     handleFirestoreError(err, OperationType.DELETE, COLLECTION_HISTORY);
   }
 }
