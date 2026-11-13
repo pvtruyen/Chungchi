@@ -272,6 +272,59 @@ export async function fetchCloudSyncStatus(): Promise<SyncStatus | null> {
 }
 
 /**
+ * Lưu cấu hình chế độ & Link Apps Script lên Firestore (gdqp_meta/status)
+ * để mọi máy tính / trình duyệt khác tự động nhận cấu hình khi truy cập.
+ */
+export async function saveCloudSyncStatus(
+  status: SyncStatus
+): Promise<{ success: boolean; needsAuth?: boolean; error?: string }> {
+  if (!auth.currentUser) {
+    return {
+      success: false,
+      needsAuth: true,
+      error: 'Cần đăng nhập Google Admin (Firebase Auth) để đồng bộ cấu hình sang các máy khác.',
+    };
+  }
+
+  const payload: Record<string, unknown> = {
+    source: String(status.source || 'local_excel').slice(0, 50),
+    totalRecords: Number(status.totalRecords || 0),
+    lastUpdated: String(status.lastUpdated || new Date().toLocaleString('vi-VN')).slice(0, 64),
+    fileCount: Number(status.fileCount || 0),
+    fileNames: Array.isArray(status.fileNames)
+      ? status.fileNames.slice(0, 500).map((fn) => String(fn).slice(0, 255))
+      : [],
+    driveFolderFound: Boolean(status.driveFolderFound),
+  };
+
+  if (status.appsScriptUrl && status.appsScriptUrl.trim()) {
+    payload.appsScriptUrl = status.appsScriptUrl.trim().slice(0, 500);
+  }
+
+  try {
+    await runWriteWithQuotaGuard(
+      () => setDoc(doc(db, COLLECTION_META, DOC_STATUS), payload, { merge: true }),
+      8000
+    );
+    return { success: true };
+  } catch (err: unknown) {
+    if (isQuotaExceededError(err)) {
+      markFirestoreWriteQuotaExceeded();
+      return { success: false, error: QUOTA_EXCEEDED_VI_MESSAGE };
+    }
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    const isPermError = rawMsg.toLowerCase().includes('permission') || rawMsg.toLowerCase().includes('insufficient');
+    return {
+      success: false,
+      needsAuth: isPermError,
+      error: isPermError
+        ? 'Tài khoản hiện tại chưa được cấp quyền ghi cấu hình lên Firestore (kiểm tra email Admin hoặc Firestore Rules).'
+        : rawMsg,
+    };
+  }
+}
+
+/**
  * Lấy danh sách chứng chỉ trên Cloud Firestore phục vụ Cán bộ quản lý & xóa từng dòng
  */
 export async function fetchCertificatesForAdmin(

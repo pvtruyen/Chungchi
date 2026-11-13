@@ -39,6 +39,7 @@ import {
   extractDriveFolderId,
   switchDataSourceMode,
   resetToDemo,
+  getSyncStatus,
 } from '../services/storageService';
 import {
   pingAppsScript,
@@ -52,6 +53,7 @@ import {
   fetchCertificatesForAdmin,
   deleteRecordFromCloud,
   seedCloudIfEmpty,
+  saveCloudSyncStatus,
   hasFirestoreWriteQuotaExceeded,
   onFirestoreQuotaStatusChange,
   resetFirestoreWriteQuotaFlag,
@@ -128,6 +130,8 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   const [isQuotaExhausted, setIsQuotaExhausted] = useState<boolean>(() =>
     hasFirestoreWriteQuotaExceeded()
   );
+  const [pendingCloudSyncStatus, setPendingCloudSyncStatus] = useState<SyncStatus | null>(null);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isFirebaseAuthenticated = isLoggedInGoogle || Boolean(auth.currentUser);
@@ -170,8 +174,12 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     if (isOpen) {
       setActiveTab(initialTab);
       setIsQuotaExhausted(hasFirestoreWriteQuotaExceeded());
+      const syncedUrl = getSavedAppsScriptUrl() || syncStatus.appsScriptUrl || getSavedDriveFolderUrl();
+      if (syncedUrl && !driveLinkInput) {
+        setDriveLinkInput(syncedUrl);
+      }
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, syncStatus.appsScriptUrl, driveLinkInput]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'manage' && auth.currentUser) {
@@ -182,18 +190,27 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentMode: 'firebase' | 'drive' = syncStatus.source === 'apps_script' ? 'drive' : 'firebase';
+  const currentMode: 'firebase' | 'drive' =
+    syncStatus.source === 'apps_script' || syncStatus.source === 'drive_oauth' ? 'drive' : 'firebase';
 
-  const handleSwitchMode = (mode: 'firebase' | 'drive') => {
+  const handleSwitchMode = async (mode: 'firebase' | 'drive') => {
     setErrorMsg(null);
     setSuccessMsg(null);
-    if (mode === 'drive' && !getSavedAppsScriptUrl()) {
+    if (mode === 'drive' && !getSavedAppsScriptUrl() && syncStatus.source !== 'drive_oauth') {
       setActiveTab('drive_config');
-      setErrorMsg('Chưa có Link Google Apps Script Web App. Vui lòng dán link ở bên dưới và bấm "Kết nối & Lưu".');
+      setErrorMsg('Chưa có Link Google Apps Script Web App. Vui lòng dán link ở bên dưới và bấm "Kiểm tra & Nạp dữ liệu".');
       return;
     }
-    switchDataSourceMode(mode);
+    const updated = switchDataSourceMode(mode);
     onDataUpdated();
+    if (auth.currentUser) {
+      const cloudRes = await saveCloudSyncStatus(updated);
+      if (!cloudRes.success && cloudRes.needsAuth) {
+        setPendingCloudSyncStatus(updated);
+      }
+    } else if (mode === 'drive' && updated.appsScriptUrl) {
+      setPendingCloudSyncStatus(updated);
+    }
     setSuccessMsg(
       mode === 'drive'
         ? 'Đã chuyển sang Chế độ 2: Thư mục Google Drive ("Số hóa chứng chỉ").'
@@ -297,6 +314,14 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
           });
         }
 
+        const latestStatus = getSyncStatus();
+        const cloudSyncRes = await saveCloudSyncStatus({
+          ...latestStatus,
+          source: 'apps_script',
+          appsScriptUrl: raw,
+          driveFolderFound: true,
+        });
+
         onDataUpdated();
 
         const errorFiles = finalFiles.filter((f) => f.status === 'error');
@@ -308,9 +333,20 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
           setErrorMsg(
             `Đã kết nối tới thư mục "${ping.folderName || 'Số hóa chứng chỉ'}" nhưng thư mục chưa có file Excel (.xlsx, .xls, .csv) hoặc Google Sheets nào.`
           );
-        } else {
+        } else if (!cloudSyncRes.success) {
+          setPendingCloudSyncStatus({
+            ...latestStatus,
+            source: 'apps_script',
+            appsScriptUrl: raw,
+            driveFolderFound: true,
+          });
           setSuccessMsg(
-            `Đã kết nối ${finalFiles.length} file (${loadedRecords.length.toLocaleString('vi-VN')} chứng chỉ) từ thư mục "${synced.folderName || ping.folderName || 'Số hóa chứng chỉ'}"! Dữ liệu Chế độ 2 đã sẵn sàng tra cứu.`
+            `Đã nạp ${loadedRecords.length.toLocaleString('vi-VN')} chứng chỉ từ ${finalFiles.length} file trên máy này! Lưu ý: ${cloudSyncRes.error}`
+          );
+        } else {
+          setPendingCloudSyncStatus(null);
+          setSuccessMsg(
+            `Đã kết nối ${finalFiles.length} file (${loadedRecords.length.toLocaleString('vi-VN')} chứng chỉ) VÀ đã đồng bộ Link Apps Script lên Cloud! Mọi máy khác mở web đều có thể tìm kiếm ngay.`
           );
         }
       } catch (err: unknown) {
@@ -382,11 +418,31 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     try {
       const res = await googleSignInAdmin();
       onLoginSuccess(res.user.email || 'Cán bộ Quản trị', '');
+      if (pendingCloudSyncStatus) {
+        const cloudRes = await saveCloudSyncStatus(pendingCloudSyncStatus);
+        if (cloudRes.success) {
+          setPendingCloudSyncStatus(null);
+          setSuccessMsg(
+            `Đã đăng nhập (${res.user.email}) và đồng bộ cấu hình Google Drive lên Cloud thành công! Các máy khác mở web sẽ tìm kiếm được ngay.`
+          );
+          return;
+        }
+      }
       setSuccessMsg(`Đã xác thực Firebase Admin thành công: ${res.user.email}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi đăng nhập Google Firebase';
       setErrorMsg(`Đăng nhập thất bại: ${msg}`);
     }
+  };
+
+  const handleCopyShareAppsScriptLink = () => {
+    const scriptUrl = getSavedAppsScriptUrl() || syncStatus.appsScriptUrl || driveLinkInput.trim();
+    if (!scriptUrl || !scriptUrl.includes('script.google.com/macros/')) return;
+    const base = `${window.location.origin}${window.location.pathname}`;
+    const fullShareUrl = `${base}?appsScript=${encodeURIComponent(scriptUrl)}`;
+    navigator.clipboard.writeText(fullShareUrl);
+    setCopiedShareLink(true);
+    setTimeout(() => setCopiedShareLink(false), 2500);
   };
 
   const handleGoogleLogout = async () => {
@@ -1159,6 +1215,50 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                       <span>{isTestingAppsScript ? 'Đang tải...' : 'Kiểm tra & Nạp dữ liệu'}</span>
                     </button>
                   </div>
+
+                  {/* Cross-Machine Sync Notice & Shareable Link */}
+                  {(pendingCloudSyncStatus || !isFirebaseAuthenticated) &&
+                    (getSavedAppsScriptUrl() || syncStatus.appsScriptUrl) && (
+                      <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="block text-amber-900">
+                              Đồng bộ sang máy khác: Cần đăng nhập Google Admin
+                            </strong>
+                            <span>
+                              Link Apps Script hiện mới lưu trên máy này. Hãy bấm nút bên phải để đăng nhập Google Admin và đẩy cấu hình lên Cloud cho tất cả máy khác cùng tra cứu.
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleQuickFirebaseAdminLogin}
+                          className="shrink-0 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-3.5 py-2 rounded-xl cursor-pointer"
+                        >
+                          Đăng nhập &amp; Đồng bộ Cloud
+                        </button>
+                      </div>
+                    )}
+
+                  {(getSavedAppsScriptUrl() || syncStatus.appsScriptUrl) && (
+                    <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <strong className="text-emerald-900">Link chia sẻ cấu hình nhanh cho máy khác:</strong>{' '}
+                        <span className="text-[11px] text-emerald-800">
+                          (Gửi link này cho máy khác hoặc sinh viên để mở web là tự kết nối ngay Chế độ 2, kể cả khi Firebase hết hạn mức)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyShareAppsScriptLink}
+                        className="shrink-0 inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-lg cursor-pointer"
+                      >
+                        {copiedShareLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedShareLink ? 'Đã chép Link chia sẻ!' : 'Chép Link cho máy khác'}</span>
+                      </button>
+                    </div>
+                  )}
 
                   {/* Direct 1-Click OAuth Drive Reader (No Apps Script Needed) */}
                   <div className="p-3.5 rounded-2xl bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">

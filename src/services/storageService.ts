@@ -271,6 +271,23 @@ export function clearAllLocalRecords(): void {
   });
 }
 
+/**
+ * Xóa dữ liệu mẫu khỏi RAM/LocalStorage nếu máy mới đang giữ dữ liệu demo trước khi nhận cấu hình Drive từ Cloud
+ */
+export function clearDemoRecordsIfNeeded(): void {
+  if (recordsIndex.size === 0 || recordsIndex.size > INITIAL_DEMO_RECORDS.length) return;
+  const demoIds = new Set(INITIAL_DEMO_RECORDS.map((r) => r.id));
+  const allAreDemo = Array.from(recordsIndex.values()).every((r) => demoIds.has(r.id));
+  if (allAreDemo) {
+    recordsIndex.clear();
+    try {
+      localStorage.removeItem(STORAGE_KEY_RECORDS);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export function cacheRecord(record: CertificateRecord): void {
   if (record && record.mssv) {
     recordsIndex.set(record.mssv.trim().toUpperCase(), record);

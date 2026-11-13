@@ -51,6 +51,7 @@ function doGet(e) {
 function inspectFolder(folder, parseRows, normQ) {
   const files = [], records = [], matches = [];
   let totalRecords = 0;
+  const isMssvQuery = Boolean(normQ && normQ.indexOf(" ") === -1 && /^[a-z0-9_-]{4,20}$/.test(normQ));
   const it = folder.getFiles();
   while (it.hasNext()) {
     const f = it.next(), name = f.getName(), mime = f.getMimeType();
@@ -100,6 +101,7 @@ function inspectFolder(folder, parseRows, normQ) {
       }
       totalRecords += fileCount;
       files.push({ name: name, mimeType: mime, rowCount: fileCount, status: fileCount > 0 ? "connected" : "empty" });
+      if (isMssvQuery && matches.length > 0) break;
     } catch (err) {
       files.push({ name: name, mimeType: mime, rowCount: 0, status: "error", error: String(err && err.message || err) });
     } finally {

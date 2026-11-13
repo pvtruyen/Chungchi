@@ -16,13 +16,16 @@ export interface AppsScriptResponse {
   executionTimeMs?: number;
 }
 
-async function fetchAppsScriptJson(url: string): Promise<AppsScriptResponse> {
+async function fetchAppsScriptJson(url: string, timeoutMs: number = 45000): Promise<AppsScriptResponse> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+
   try {
+    // Không gửi custom headers để giữ CORS Simple Request, tương thích mọi trình duyệt và redirect 302 của Google
     const res = await fetch(url, {
       method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
+      redirect: 'follow',
+      ...(controller ? { signal: controller.signal } : {}),
     });
 
     if (!res.ok) {
@@ -33,17 +36,28 @@ async function fetchAppsScriptJson(url: string): Promise<AppsScriptResponse> {
     try {
       return JSON.parse(text) as AppsScriptResponse;
     } catch {
+      const looksLikeGoogleLogin =
+        text.includes('accounts.google.com') || text.includes('ServiceLogin') || text.includes('<html');
       throw new Error(
-        'Google Apps Script không trả về JSON hợp lệ. Hãy kiểm tra lại quyền Deploy Web App (Anyone / Bất kỳ ai) và URL kết thúc bằng /exec.'
+        looksLikeGoogleLogin
+          ? 'Google Apps Script yêu cầu đăng nhập Google. Vui lòng Deploy lại Web App với mục "Who has access" là "Anyone (Bất kỳ ai)" để máy khác tra cứu được.'
+          : 'Google Apps Script không trả về JSON hợp lệ. Hãy kiểm tra lại quyền Deploy Web App (Anyone) và URL kết thúc bằng /exec.'
       );
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Lỗi kết nối tới Google Apps Script';
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    const msg = isAbort
+      ? 'Kết nối tới Google Apps Script bị quá thời gian chờ (Timeout).'
+      : err instanceof Error
+      ? err.message
+      : 'Lỗi kết nối tới Google Apps Script';
     return {
       success: false,
       found: false,
       error: msg,
     };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -53,7 +67,7 @@ async function fetchAppsScriptJson(url: string): Promise<AppsScriptResponse> {
 export async function pingAppsScript(webAppUrl: string): Promise<AppsScriptResponse> {
   const cleanUrl = webAppUrl.trim();
   const separator = cleanUrl.includes('?') ? '&' : '?';
-  return fetchAppsScriptJson(`${cleanUrl}${separator}action=ping`);
+  return fetchAppsScriptJson(`${cleanUrl}${separator}action=ping`, 45000);
 }
 
 /**
@@ -62,7 +76,7 @@ export async function pingAppsScript(webAppUrl: string): Promise<AppsScriptRespo
 export async function syncAllFromAppsScript(webAppUrl: string): Promise<AppsScriptResponse> {
   const cleanUrl = webAppUrl.trim();
   const separator = cleanUrl.includes('?') ? '&' : '?';
-  return fetchAppsScriptJson(`${cleanUrl}${separator}action=sync`);
+  return fetchAppsScriptJson(`${cleanUrl}${separator}action=sync`, 120000);
 }
 
 /**
@@ -80,5 +94,5 @@ export async function queryAppsScript(
       ? `${cleanUrl}${separator}action=ping`
       : `${cleanUrl}${separator}mssv=${encodeURIComponent(cleanQuery)}&q=${encodeURIComponent(cleanQuery)}`;
 
-  return fetchAppsScriptJson(queryUrl);
+  return fetchAppsScriptJson(queryUrl, 60000);
 }

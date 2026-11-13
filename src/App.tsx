@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { SearchHero } from './components/SearchHero';
 import { HighlightedResultCard } from './components/HighlightedResultCard';
@@ -24,16 +24,20 @@ import {
   cacheRecord,
   getSyncStatus,
   saveSyncStatus,
+  saveRecords,
+  saveAppsScriptUrl,
   getSavedAppsScriptUrl,
   switchDataSourceMode,
+  clearDemoRecordsIfNeeded,
 } from './services/storageService';
 import { initAuth } from './services/firebaseAuth';
-import { testFirestoreConnection } from './services/firebaseConfig';
-import { queryAppsScript } from './services/appsScriptConnector';
+import { testFirestoreConnection, auth } from './services/firebaseConfig';
+import { queryAppsScript, syncAllFromAppsScript } from './services/appsScriptConnector';
 import { isAdminSessionActive, grantAdminSession } from './services/adminAuthService';
 import {
   fetchRecordFromCloud,
   fetchCloudSyncStatus,
+  saveCloudSyncStatus,
   fetchCertificatesForAdmin,
   recordSearchEvent,
   hasFirestoreWriteQuotaExceeded,
@@ -103,6 +107,9 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  const [isBgSyncingDrive, setIsBgSyncingDrive] = useState(false);
+  const bgDriveSyncTriggeredRef = useRef<string | null>(null);
+
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
   const isOfficerAuthorized = isAdminAuthenticated || isLoggedInGoogle;
   const activeMode: 'firebase' | 'drive' =
@@ -110,26 +117,116 @@ export default function App() {
       ? 'drive'
       : 'firebase';
 
-  const refreshCloudMeta = useCallback(async () => {
+  const triggerBackgroundAppsScriptSync = useCallback(async (appsScriptUrl: string) => {
+    const cleanUrl = appsScriptUrl.trim();
+    if (!cleanUrl || bgDriveSyncTriggeredRef.current === cleanUrl) return;
+    bgDriveSyncTriggeredRef.current = cleanUrl;
+    setIsBgSyncingDrive(true);
     try {
-      const current = getSyncStatus();
-      // Khi đang sử dụng Chế độ 2 (Google Drive), giữ nguyên thống kê file Drive, không để Firestore ghi đè
-      if (current.source === 'apps_script' || current.source === 'drive_oauth') {
-        return;
-      }
-      await testFirestoreConnection();
-      const cloudMeta = await fetchCloudSyncStatus();
-      if (cloudMeta && cloudMeta.totalRecords >= 0) {
-        setSyncStatus(cloudMeta);
-        saveSyncStatus(cloudMeta);
+      const synced = await syncAllFromAppsScript(cleanUrl);
+      if (synced.success && synced.records && synced.records.length > 0) {
+        const finalFiles = synced.files || [];
+        saveRecords(
+          synced.records,
+          'apps_script',
+          finalFiles.map((f) => f.name),
+          {
+            driveFolderFound: true,
+            driveFolderName: synced.folderName || 'Số hóa chứng chỉ',
+            driveFolderId: synced.folderId,
+            driveFiles: finalFiles,
+          }
+        );
+        setSyncStatus(getSyncStatus());
       }
     } catch (err) {
-      console.warn('Đang sử dụng bộ nhớ đệm cục bộ:', err);
+      console.warn('Đồng bộ nền Google Drive chưa hoàn tất (vẫn tra cứu trực tiếp được):', err);
+    } finally {
+      setIsBgSyncingDrive(false);
     }
   }, []);
 
+  const refreshCloudMeta = useCallback(async () => {
+    try {
+      await testFirestoreConnection();
+      const cloudMeta = await fetchCloudSyncStatus();
+      const current = getSyncStatus();
+
+      if (cloudMeta && cloudMeta.appsScriptUrl && cloudMeta.appsScriptUrl.trim()) {
+        saveAppsScriptUrl(cloudMeta.appsScriptUrl.trim());
+      }
+
+      if (cloudMeta && cloudMeta.totalRecords >= 0) {
+        const isCloudAppsScript = cloudMeta.source === 'apps_script';
+        const isLocalDrive = current.source === 'drive_oauth' || current.source === 'apps_script';
+
+        if (isCloudAppsScript) {
+          clearDemoRecordsIfNeeded();
+          const localLoaded = getLoadedCount();
+          const mergedStatus: SyncStatus = {
+            ...current,
+            ...cloudMeta,
+            appsScriptUrl: cloudMeta.appsScriptUrl || getSavedAppsScriptUrl(),
+            totalRecords:
+              localLoaded > 0 && localLoaded >= cloudMeta.totalRecords * 0.5
+                ? localLoaded
+                : cloudMeta.totalRecords,
+            driveFiles: current.driveFiles,
+            driveFolderName: current.driveFolderName || 'Số hóa chứng chỉ',
+          };
+          setSyncStatus(mergedStatus);
+          saveSyncStatus(mergedStatus);
+
+          const resolvedUrl = mergedStatus.appsScriptUrl || getSavedAppsScriptUrl();
+          if (resolvedUrl && localLoaded < Math.max(1, cloudMeta.totalRecords * 0.5)) {
+            void triggerBackgroundAppsScriptSync(resolvedUrl);
+          }
+          return;
+        }
+
+        // Nếu máy này đang dùng OAuth Drive cục bộ thì giữ nguyên thống kê OAuth của máy này
+        if (isLocalDrive && current.source === 'drive_oauth') {
+          return;
+        }
+
+        setSyncStatus(cloudMeta);
+        saveSyncStatus(cloudMeta);
+      } else {
+        const localUrl = getSavedAppsScriptUrl();
+        if (current.source === 'apps_script' && localUrl && getLoadedCount() === 0) {
+          void triggerBackgroundAppsScriptSync(localUrl);
+        }
+      }
+    } catch (err) {
+      console.warn('Đang sử dụng bộ nhớ đệm cục bộ:', err);
+      const localUrl = getSavedAppsScriptUrl();
+      const current = getSyncStatus();
+      if (current.source === 'apps_script' && localUrl && getLoadedCount() === 0) {
+        void triggerBackgroundAppsScriptSync(localUrl);
+      }
+    }
+  }, [triggerBackgroundAppsScriptSync]);
+
   useEffect(() => {
     initStorage();
+
+    // Hỗ trợ mở nhanh bằng link chia sẻ ?appsScript=... trên máy khác
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const sharedScriptUrl = params.get('appsScript');
+      if (sharedScriptUrl && sharedScriptUrl.includes('script.google.com/macros/')) {
+        saveAppsScriptUrl(sharedScriptUrl);
+        clearDemoRecordsIfNeeded();
+        const updated = switchDataSourceMode('drive');
+        setSyncStatus(updated);
+      }
+    } catch {
+      // ignore
+    }
+
+    setSyncStatus(getSyncStatus());
+    setIsAdminAuthenticated(isAdminSessionActive());
+
     hydrateFromIndexedDb().then((loadedTotal) => {
       const st = getSyncStatus();
       if (loadedTotal > 0 && st.source !== 'demo_data' && st.totalRecords !== loadedTotal) {
@@ -137,10 +234,8 @@ export default function App() {
         saveSyncStatus(updated);
         setSyncStatus(updated);
       }
+      refreshCloudMeta();
     });
-    setSyncStatus(getSyncStatus());
-    setIsAdminAuthenticated(isAdminSessionActive());
-    refreshCloudMeta();
 
     setIsWriteQuotaExhausted(hasFirestoreWriteQuotaExceeded());
     const unsubscribeQuota = onFirestoreQuotaStatusChange((exhausted) => {
@@ -218,8 +313,14 @@ export default function App() {
       openModalWithTab('drive_config');
       return;
     }
+    if (mode === 'drive') {
+      clearDemoRecordsIfNeeded();
+    }
     const updated = switchDataSourceMode(mode);
     setSyncStatus(updated);
+    if (auth.currentUser) {
+      saveCloudSyncStatus(updated).catch(console.warn);
+    }
   };
 
   const handleSearch = async (rawQuery: string) => {
@@ -235,26 +336,37 @@ export default function App() {
     setNotFoundMssv(null);
     setSearchDiagnostic(null);
 
-    const appsScriptUrl = getSavedAppsScriptUrl();
+    const appsScriptUrl = getSavedAppsScriptUrl() || syncStatus.appsScriptUrl || '';
     if (activeMode === 'drive') {
-      // 1. Tìm tức thì trong bộ nhớ dữ liệu Drive đã tải về (từ Quét Drive 1-Click hoặc Apps Script Sync)
-      const isDriveIndexLoaded =
-        (syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') &&
-        getLoadedCount() > 0 &&
-        syncStatus.totalRecords > 0;
+      const loadedCount = getLoadedCount();
+      const isFullDriveIndexLoaded =
+        syncStatus.source === 'drive_oauth' ||
+        (loadedCount > 0 && loadedCount >= Math.max(1, syncStatus.totalRecords * 0.5));
 
-      if (isDriveIndexLoaded) {
-        const localDriveMatches = lookupByMssvOrName(trimmed);
-        if (localDriveMatches.length === 1) {
-          setResult(localDriveMatches[0]);
-          recordSearchEvent(localDriveMatches[0], localDriveMatches[0].mssv).catch(console.warn);
-          setIsSearching(false);
-          return;
+      // 1. Tìm trong bộ nhớ dữ liệu Drive (ưu tiên tìm exact MSSV hoặc khi đã nạp đủ toàn bộ chỉ mục)
+      if (loadedCount > 0) {
+        if (looksLikeMssv) {
+          const exactLocal = lookupByMssv(cleanUpper);
+          if (exactLocal) {
+            setResult(exactLocal);
+            recordSearchEvent(exactLocal, exactLocal.mssv).catch(console.warn);
+            setIsSearching(false);
+            return;
+          }
         }
-        if (localDriveMatches.length > 1) {
-          setMatchingList(localDriveMatches);
-          setIsSearching(false);
-          return;
+        if (isFullDriveIndexLoaded) {
+          const localDriveMatches = lookupByMssvOrName(trimmed);
+          if (localDriveMatches.length === 1) {
+            setResult(localDriveMatches[0]);
+            recordSearchEvent(localDriveMatches[0], localDriveMatches[0].mssv).catch(console.warn);
+            setIsSearching(false);
+            return;
+          }
+          if (localDriveMatches.length > 1) {
+            setMatchingList(localDriveMatches);
+            setIsSearching(false);
+            return;
+          }
         }
       }
 
@@ -311,9 +423,9 @@ export default function App() {
       }
 
       // 3. Chế độ 2 chưa kết nối file nào
-      if (!isDriveIndexLoaded) {
+      if (loadedCount === 0) {
         setSearchDiagnostic(
-          'Chế độ 2 (Google Drive) hiện chưa tải dữ liệu từ file Excel nào. Vui lòng bấm "Cài đặt Kết nối" -> tab "2. Google Drive" -> bấm "Quét & Tải Excel (1-Click)" hoặc dán link Apps Script Web App.'
+          'Chế độ 2 (Google Drive) hiện chưa nhận được Link Apps Script hoặc chưa tải dữ liệu từ file Excel nào. Cán bộ quản trị hãy mở "Cài đặt Kết nối" -> tab "2. Google Drive", đăng nhập Google Admin và bấm "Kiểm tra & Nạp dữ liệu" để đồng bộ cho mọi máy.'
         );
       }
       setNotFoundMssv(trimmed);
@@ -494,6 +606,12 @@ export default function App() {
                             {(syncStatus.fileNames || []).slice(0, 4).join(', ')}
                             {(syncStatus.fileNames || []).length > 4 ? ` (+${syncStatus.fileNames.length - 4} file)` : ''}
                           </span>
+                          {isBgSyncingDrive && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold text-[#004B8D]">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              Đang đồng bộ về máy này...
+                            </span>
+                          )}
                         </>
                       ) : (
                         <span className="text-amber-900">
