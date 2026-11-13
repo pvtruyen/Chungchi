@@ -2,10 +2,222 @@
 
 @layer base {
   body {
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Arial, sans-serif;
   }
 
   code, pre, .font-mono {
-    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
   }
+}
+
+/* ==========================================================================
+   CHẾ ĐỘ NỀN TỐI TƯƠNG THÍCH TRÌNH DUYỆT CŨ & WINDOWS XP (STANDARD HEX)
+   Màu HEX tương phản cao, viền rõ nét, tắt hiệu ứng blur nặng cho máy cấu hình thấp
+   ========================================================================== */
+html.theme-dark-legacy,
+html.theme-dark-legacy body {
+  background-color: #0b1120 !important;
+  color: #f8fafc !important;
+  font-family: Tahoma, Arial, Verdana, 'Segoe UI', sans-serif !important;
+}
+
+html.theme-dark-legacy code,
+html.theme-dark-legacy pre,
+html.theme-dark-legacy .font-mono {
+  font-family: Consolas, 'Lucida Console', 'Courier New', monospace !important;
+}
+
+/* Tắt hiệu ứng mờ GPU nặng trên trình duyệt cũ / Windows XP */
+html.theme-dark-legacy .backdrop-blur-md,
+html.theme-dark-legacy .backdrop-blur-xs,
+html.theme-dark-legacy .backdrop-blur-sm {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.theme-dark-legacy .blur-3xl {
+  display: none !important;
+}
+
+/* Nền trang & Header / Hero */
+html.theme-dark-legacy header {
+  background-color: #071426 !important;
+  border-bottom: 2px solid #38bdf8 !important;
+}
+
+html.theme-dark-legacy footer {
+  background-color: #050c18 !important;
+  border-top: 2px solid #1e3a5f !important;
+}
+
+html.theme-dark-legacy .ctu-hero-banner {
+  background: #091d36 !important;
+  border-bottom: 3px solid #facc15 !important;
+}
+
+/* Bề mặt thẻ trắng -> Xám xanh tối tương phản cao */
+html.theme-dark-legacy .bg-white,
+html.theme-dark-legacy .bg-white\/95 {
+  background-color: #111827 !important;
+}
+
+html.theme-dark-legacy .bg-slate-50,
+html.theme-dark-legacy .bg-slate-50\/80,
+html.theme-dark-legacy .bg-slate-50\/90 {
+  background-color: #0b1120 !important;
+}
+
+html.theme-dark-legacy .bg-slate-100 {
+  background-color: #1e293b !important;
+}
+
+html.theme-dark-legacy .bg-slate-200 {
+  background-color: #334155 !important;
+}
+
+/* Hộp thông tin màu nhấn (Xanh / Vàng / Xanh lá / Đỏ) */
+html.theme-dark-legacy .bg-blue-50,
+html.theme-dark-legacy .bg-blue-50\/80,
+html.theme-dark-legacy .bg-blue-50\/70,
+html.theme-dark-legacy .bg-sky-50 {
+  background-color: #0f223d !important;
+}
+
+html.theme-dark-legacy .bg-amber-50,
+html.theme-dark-legacy .bg-amber-50\/70,
+html.theme-dark-legacy .bg-amber-50\/90 {
+  background-color: #241b07 !important;
+}
+
+html.theme-dark-legacy .bg-emerald-50,
+html.theme-dark-legacy .bg-emerald-50\/80 {
+  background-color: #09251c !important;
+}
+
+html.theme-dark-legacy .bg-rose-50 {
+  background-color: #2c1018 !important;
+}
+
+/* Viền rõ nét trên nền tối (quan trọng với màn hình CRT / LCD đời cũ) */
+html.theme-dark-legacy .border-slate-100,
+html.theme-dark-legacy .border-slate-200,
+html.theme-dark-legacy .border-slate-200\/70,
+html.theme-dark-legacy .border-slate-200\/80,
+html.theme-dark-legacy .border-slate-300 {
+  border-color: #334155 !important;
+}
+
+html.theme-dark-legacy .border-blue-200,
+html.theme-dark-legacy .border-sky-200 {
+  border-color: #1d4ed8 !important;
+}
+
+html.theme-dark-legacy .border-amber-200,
+html.theme-dark-legacy .border-amber-300 {
+  border-color: #d97706 !important;
+}
+
+html.theme-dark-legacy .border-emerald-200 {
+  border-color: #059669 !important;
+}
+
+html.theme-dark-legacy .border-rose-200 {
+  border-color: #be123c !important;
+}
+
+html.theme-dark-legacy .divide-slate-100 > :not(:last-child) {
+  border-color: #334155 !important;
+}
+
+/* Chữ tương phản cao trên nền tối */
+html.theme-dark-legacy .text-slate-900,
+html.theme-dark-legacy .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+html.theme-dark-legacy .text-slate-700,
+html.theme-dark-legacy .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.theme-dark-legacy .text-slate-500,
+html.theme-dark-legacy .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html.theme-dark-legacy .text-\[\#002855\],
+html.theme-dark-legacy .text-\[\#003B73\],
+html.theme-dark-legacy .text-\[\#004B8D\],
+html.theme-dark-legacy .text-\[\#00529C\] {
+  color: #38bdf8 !important;
+}
+
+html.theme-dark-legacy .text-amber-700,
+html.theme-dark-legacy .text-amber-800,
+html.theme-dark-legacy .text-amber-900,
+html.theme-dark-legacy .text-amber-950 {
+  color: #fde047 !important;
+}
+
+html.theme-dark-legacy .text-emerald-700,
+html.theme-dark-legacy .text-emerald-800,
+html.theme-dark-legacy .text-emerald-900,
+html.theme-dark-legacy .text-emerald-950 {
+  color: #6ee7b7 !important;
+}
+
+html.theme-dark-legacy .text-rose-600,
+html.theme-dark-legacy .text-rose-700,
+html.theme-dark-legacy .text-rose-800 {
+  color: #fda4af !important;
+}
+
+/* Ô nhập liệu & Select */
+html.theme-dark-legacy input,
+html.theme-dark-legacy textarea,
+html.theme-dark-legacy select {
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+  border-color: #475569 !important;
+}
+
+html.theme-dark-legacy input::placeholder,
+html.theme-dark-legacy textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.theme-dark-legacy .ctu-search-shell {
+  background-color: #0f172a !important;
+  border: 2px solid #38bdf8 !important;
+}
+
+html.theme-dark-legacy .ctu-search-shell input {
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+}
+
+/* Thẻ chi tiết bên trong StudentDetailCard */
+html.theme-dark-legacy .ctu-detail-card-grid > div {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+
+/* Hover an toàn trên nền tối */
+html.theme-dark-legacy .hover\:bg-slate-100:hover,
+html.theme-dark-legacy .hover\:bg-slate-200:hover,
+html.theme-dark-legacy .hover\:bg-blue-50:hover,
+html.theme-dark-legacy .hover\:bg-blue-50\/30:hover,
+html.theme-dark-legacy .hover\:bg-blue-50\/70:hover,
+html.theme-dark-legacy .hover\:bg-blue-100:hover {
+  background-color: #1e3a5f !important;
+}
+
+html.theme-dark-legacy .hover\:bg-amber-50:hover,
+html.theme-dark-legacy .hover\:bg-amber-100:hover {
+  background-color: #3b2a0a !important;
+}
+
+html.theme-dark-legacy .hover\:bg-rose-100:hover {
+  background-color: #4c1524 !important;
 }

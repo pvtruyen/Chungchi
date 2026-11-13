@@ -33,7 +33,7 @@ export const SearchHero: React.FC<SearchHeroProps> = ({
   };
 
   return (
-    <div className="relative overflow-hidden bg-gradient-to-b from-[#002855] via-[#003D7A] to-[#00529C] text-white pt-8 pb-11 px-4 sm:px-6 lg:px-8 border-b-4 border-amber-400 shadow-lg">
+    <div className="ctu-hero-banner relative overflow-hidden bg-gradient-to-b from-[#002855] via-[#003D7A] to-[#00529C] text-white pt-8 pb-11 px-4 sm:px-6 lg:px-8 border-b-4 border-amber-400 shadow-lg">
       {/* Subtle Academic Grid Background */}
       <div className="absolute inset-0 bg-[radial-gradient(#93C5FD_1px,transparent_1px)] [background-size:24px_24px] opacity-10 pointer-events-none" />
       <div className="absolute -top-24 -left-24 w-96 h-96 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
@@ -61,7 +61,7 @@ export const SearchHero: React.FC<SearchHeroProps> = ({
 
         {/* Search Input Box */}
         <form onSubmit={handleSubmit} className="relative max-w-2xl mx-auto">
-          <div className="relative flex items-center bg-white rounded-2xl p-2 shadow-2xl shadow-[#001833]/50 border-2 border-sky-300/50 focus-within:border-amber-400 focus-within:ring-4 focus-within:ring-amber-400/25 transition-all">
+          <div className="ctu-search-shell relative flex items-center bg-white rounded-2xl p-2 shadow-2xl shadow-[#001833]/50 border-2 border-sky-300/50 focus-within:border-amber-400 focus-within:ring-4 focus-within:ring-amber-400/25 transition-all">
             <div className="pl-3 pr-2 text-slate-400">
               <Search className="w-6 h-6 text-[#00529C]" />
             </div>

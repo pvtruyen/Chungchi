@@ -80,9 +80,15 @@ function inspectFolder(folder, parseRows, normQ) {
         if (!rows || rows.length < 2) continue;
         const map = detectCols(rows);
         for (let r = map.startRow; r < rows.length; r++) {
-          const row = rows[r], mssv = String(row[map.mssv] || "").trim().toUpperCase();
-          const hoTen = map.hoTen >= 0 ? String(row[map.hoTen] || "").trim() : "";
-          if (!mssv && !hoTen) continue;
+          const row = rows[r];
+          const mssv = map.mssv >= 0 ? String(row[map.mssv] || "").trim().toUpperCase() : "";
+          let hoTen = "";
+          if (map.hoDem >= 0 && map.ten >= 0) {
+            hoTen = (String(row[map.hoDem] || "").trim() + " " + String(row[map.ten] || "").trim()).replace(/\\s+/g, " ").trim();
+          } else if (map.hoTen >= 0) {
+            hoTen = String(row[map.hoTen] || "").replace(/\\s+/g, " ").trim();
+          }
+          if (!mssv) continue;
           fileCount++;
           if (!parseRows) continue;
           if (!normQ || norm(mssv) === normQ || (hoTen && norm(hoTen).indexOf(normQ) !== -1)) {
@@ -115,54 +121,130 @@ function convertExcelToSheet(fileId, name) {
 }
 
 function buildRecord(row, map, r, fileName, mssv, hoTen) {
+  const xl = map.xepLoai >= 0 ? String(row[map.xepLoai] || "").trim() : "";
+  const dt = map.diemThi >= 0 ? String(row[map.diemThi] || "").trim() : "";
+  const xepLoaiOut = (xl && dt) ? (xl.indexOf(dt) !== -1 ? xl : xl + " (" + dt + ")") : (xl || dt || "");
   return {
     id: (mssv || "ROW") + "_" + r, mssv: mssv, hoVaTen: hoTen || ("Sinh viên " + mssv),
     stt: map.stt >= 0 ? row[map.stt] : (r - map.startRow + 1),
     ngaySinh: map.ngaySinh >= 0 ? fmtDate(row[map.ngaySinh]) : "",
-    noiSinh: map.noiSinh >= 0 ? String(row[map.noiSinh] || "") : "",
-    gioiTinh: map.gioiTinh >= 0 ? String(row[map.gioiTinh] || "") : "",
-    danToc: map.danToc >= 0 ? String(row[map.danToc] || "") : "",
-    khoaHoc: map.khoaHoc >= 0 ? String(row[map.khoaHoc] || "") : "",
-    nganhDaoTao: map.nganh >= 0 ? String(row[map.nganh] || "") : "",
-    xepLoai: map.xepLoai >= 0 ? String(row[map.xepLoai] || "") : "",
-    soHieuChungChi: map.soHieu >= 0 ? String(row[map.soHieu] || "") : "",
-    soVaoSoGoc: map.soSo >= 0 ? String(row[map.soSo] || "") : "",
+    noiSinh: map.noiSinh >= 0 ? String(row[map.noiSinh] || "").trim() : "",
+    gioiTinh: map.gioiTinh >= 0 ? String(row[map.gioiTinh] || "").trim() : "",
+    danToc: map.danToc >= 0 ? String(row[map.danToc] || "").trim() : "",
+    khoaHoc: map.khoaHoc >= 0 ? String(row[map.khoaHoc] || "").trim() : "",
+    nganhDaoTao: map.nganh >= 0 ? String(row[map.nganh] || "").trim() : "",
+    xepLoai: xepLoaiOut,
+    soHieuChungChi: map.soHieu >= 0 ? String(row[map.soHieu] || "").trim() : "",
+    soVaoSoGoc: map.soSo >= 0 ? String(row[map.soSo] || "").trim() : "",
     ngayCap: map.ngayCap >= 0 ? fmtDate(row[map.ngayCap]) : "",
     tenChungChi: "Chứng chỉ Giáo dục Quốc phòng và An ninh",
     donViCap: "Đại học Cần Thơ", fileName: fileName
   };
 }
 
+function hasWord(h, w) {
+  return new RegExp("(^| )" + w + "( |$)").test(h);
+}
+
+function classifyCol(h) {
+  if (!h) return null;
+  if (h === "stt" || h === "so thu tu" || hasWord(h, "stt")) return "stt";
+  if (h === "mssv" || h.indexOf("mssv") !== -1 || h.indexOf("ma nguoi hoc") !== -1 || h.indexOf("ma sinh vien") !== -1 || h.indexOf("ma so sinh vien") !== -1 || h === "ma sv" || h === "ma hv") return "mssv";
+  if (h.indexOf("ngay thang nam sinh") !== -1 || h.indexOf("ngay sinh") !== -1 || h.indexOf("ng sinh") !== -1 || h.indexOf("nam sinh") !== -1 || h.indexOf("sinh ngay") !== -1 || h === "ntns" || h === "dob" || hasWord(h, "ns")) return "ngaySinh";
+  if (h.indexOf("noi sinh") !== -1 || h === "que quan" || h === "nguyen quan") return "noiSinh";
+  if (h.indexOf("gioi tinh") !== -1 || hasWord(h, "phai") || h === "gt") return "gioiTinh";
+  if (h.indexOf("dan toc") !== -1 || h === "dt") return "danToc";
+  if (h.indexOf("vao so") !== -1 || h.indexOf("so goc") !== -1 || h.indexOf("so luu") !== -1) return "soSo";
+  if (h.indexOf("so hieu") !== -1 || h.indexOf("van bang") !== -1 || h === "so cc" || h === "so vb") return "soHieu";
+  if (h.indexOf("xep loai") !== -1 || h.indexOf("ket qua") !== -1) return "xepLoai";
+  if (h.indexOf("diem thi") !== -1 || h === "diem" || h.indexOf("diem trung binh") !== -1) return "diemThi";
+  if (h === "khoa" || h.indexOf("khoa hoc") !== -1 || h.indexOf("nien khoa") !== -1 || h.indexOf("khoa dao tao") !== -1) return "khoaHoc";
+  if (h === "nganh" || h.indexOf("nganh") !== -1 && h.indexOf("ngay") === -1) return "nganh";
+  if ((hasWord(h, "ho") && hasWord(h, "ten")) || (h.indexOf("chu dem") !== -1 && hasWord(h, "ten")) || h === "ho ten" || h === "ho va ten nguoi hoc" || h === "ho ten nguoi hoc") return "hoTen";
+  if (h === "ho" || h === "ho lot" || h === "ho dem" || h === "ho chu dem" || h.indexOf("ho lot") === 0 || h.indexOf("ho dem") === 0 || h.indexOf("ho chu dem") === 0) return "hoDem";
+  if (h === "ten" || h === "ten sv" || h === "ten hv" || h === "ten nguoi hoc" || h === "ten sinh vien") return "ten";
+  if (h.indexOf("ngay cap") !== -1) return "ngayCap";
+  return null;
+}
+
 function detectCols(rows) {
-  const m = { startRow: 1, stt: -1, mssv: 0, hoTen: 1, ngaySinh: -1, noiSinh: -1, gioiTinh: -1, danToc: -1, khoaHoc: -1, nganh: -1, xepLoai: -1, soHieu: -1, soSo: -1, ngayCap: -1 };
-  for (let r = 0; r < Math.min(6, rows.length); r++) {
-    let matched = false;
-    rows[r].forEach(function (v, c) {
-      const h = norm(v);
-      if (!h) return;
-      if (h === "stt") { m.stt = c; matched = true; }
-      else if (h.includes("mssv") || h.includes("ma nguoi hoc") || h.includes("ma sv") || h.includes("ma so") || h.includes("ma hv")) { m.mssv = c; matched = true; }
-      else if ((h.includes("ho") && h.includes("ten")) || h === "ho ten") { m.hoTen = c; matched = true; }
-      else if (h.includes("ngay sinh")) m.ngaySinh = c;
-      else if (h.includes("noi sinh")) m.noiSinh = c;
-      else if (h.includes("gioi tinh") || h === "phai") m.gioiTinh = c;
-      else if (h.includes("dan toc")) m.danToc = c;
-      else if (h.includes("khoa")) m.khoaHoc = c;
-      else if (h.includes("nganh")) m.nganh = c;
-      else if (h.includes("xep loai")) m.xepLoai = c;
-      else if (h.includes("so hieu") || h.includes("van bang")) m.soHieu = c;
-      else if (h.includes("vao so") || h.includes("so goc") || h.includes("so luu")) m.soSo = c;
-      else if (h.includes("ngay cap")) m.ngayCap = c;
+  let bestRow = -1, bestScore = -1, bestMap = {};
+  for (let r = 0; r < Math.min(15, rows.length); r++) {
+    const row = rows[r];
+    let hasMssvData = false;
+    for (let c = 0; c < row.length; c++) {
+      if (/^[a-zA-Z]{1,3}\\d{6,8}$/.test(String(row[c] || "").trim())) { hasMssvData = true; break; }
+    }
+    if (hasMssvData) continue;
+    const cm = {};
+    let score = 0, count = 0;
+    row.forEach(function (v, c) {
+      const k = classifyCol(norm(v));
+      if (k && cm[k] === undefined) {
+        cm[k] = c;
+        count++;
+        score += (k === "mssv" || k === "hoTen") ? 4 : (k === "ngaySinh" || k === "soHieu" || k === "soSo") ? 3 : 2;
+      }
     });
-    if (matched) { m.startRow = r + 1; break; }
+    if (count >= 2 && score > bestScore) {
+      bestScore = score;
+      bestRow = r;
+      bestMap = cm;
+    }
   }
+  const m = {
+    startRow: bestRow >= 0 ? bestRow + 1 : 1,
+    stt: bestMap.stt !== undefined ? bestMap.stt : -1,
+    mssv: bestMap.mssv !== undefined ? bestMap.mssv : 0,
+    hoTen: bestMap.hoTen !== undefined ? bestMap.hoTen : -1,
+    hoDem: bestMap.hoDem !== undefined ? bestMap.hoDem : -1,
+    ten: bestMap.ten !== undefined ? bestMap.ten : -1,
+    ngaySinh: bestMap.ngaySinh !== undefined ? bestMap.ngaySinh : -1,
+    noiSinh: bestMap.noiSinh !== undefined ? bestMap.noiSinh : -1,
+    gioiTinh: bestMap.gioiTinh !== undefined ? bestMap.gioiTinh : -1,
+    danToc: bestMap.danToc !== undefined ? bestMap.danToc : -1,
+    khoaHoc: bestMap.khoaHoc !== undefined ? bestMap.khoaHoc : -1,
+    nganh: bestMap.nganh !== undefined ? bestMap.nganh : -1,
+    xepLoai: bestMap.xepLoai !== undefined ? bestMap.xepLoai : -1,
+    diemThi: bestMap.diemThi !== undefined ? bestMap.diemThi : -1,
+    soHieu: bestMap.soHieu !== undefined ? bestMap.soHieu : -1,
+    soSo: bestMap.soSo !== undefined ? bestMap.soSo : -1,
+    ngayCap: bestMap.ngayCap !== undefined ? bestMap.ngayCap : -1
+  };
+  if (bestRow >= 0 && bestRow + 1 < rows.length) {
+    const sub = rows[bestRow + 1];
+    let hasMssvData = false;
+    for (let c = 0; c < sub.length; c++) {
+      if (/^[a-zA-Z]{1,3}\\d{6,8}$/.test(String(sub[c] || "").trim())) { hasMssvData = true; break; }
+    }
+    if (!hasMssvData) {
+      let subHoDem = -1, subTen = -1;
+      sub.forEach(function (v, c) {
+        const k = classifyCol(norm(v));
+        if (k === "hoDem") subHoDem = c;
+        else if (k === "ten") subTen = c;
+        else if (k && m[k] === -1) m[k] = c;
+      });
+      if (subHoDem >= 0 && subTen >= 0) {
+        m.hoDem = subHoDem;
+        m.ten = subTen;
+        m.hoTen = -1;
+        m.startRow = bestRow + 2;
+      }
+    }
+  }
+  if (m.ten >= 0 && m.hoDem === -1 && m.hoTen === -1) {
+    m.hoTen = m.ten;
+    m.ten = -1;
+  }
+  if (m.hoTen === -1 && m.hoDem === -1) m.hoTen = 1;
   return m;
 }
 
 function safeGetFolder(id) { try { return DriveApp.getFolderById(id); } catch (_) { return null; } }
 function findFolder(name) { const it = DriveApp.getFoldersByName(name); return it.hasNext() ? it.next() : null; }
-function norm(s) { return String(s || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/đ/g, "d").toLowerCase().replace(/\\s+/g, " ").trim(); }
-function fmtDate(v) { return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), "dd/MM/yyyy") : String(v || ""); }
+function norm(s) { return String(s || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\\s+/g, " ").trim(); }
+function fmtDate(v) { return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), "dd/MM/yyyy") : String(v || "").trim(); }
 function json(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }`;
 }
 

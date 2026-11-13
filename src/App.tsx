@@ -78,6 +78,30 @@ export default function App() {
   const [isWriteQuotaExhausted, setIsWriteQuotaExhausted] = useState(() =>
     hasFirestoreWriteQuotaExceeded()
   );
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('gdqp_theme_mode_v1');
+      if (saved === 'dark') return true;
+      if (saved === 'light') return false;
+      if (typeof navigator !== 'undefined' && /Windows NT 5\.[12]/i.test(navigator.userAgent)) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('theme-dark-legacy', isDarkMode);
+    }
+    try {
+      localStorage.setItem('gdqp_theme_mode_v1', isDarkMode ? 'dark' : 'light');
+    } catch {
+      // ignore
+    }
+  }, [isDarkMode]);
 
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
   const isOfficerAuthorized = isAdminAuthenticated || isLoggedInGoogle;
@@ -377,6 +401,8 @@ export default function App() {
         isLoggedInGoogle={isLoggedInGoogle}
         userEmail={userEmail}
         isAdmin={isAdminAuthenticated}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
       />
 
       {/* Hero & Search Form */}

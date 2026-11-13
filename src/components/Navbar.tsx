@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Settings, Lock, Clock } from 'lucide-react';
+import { BookOpen, Settings, Lock, Clock, Moon, Sun } from 'lucide-react';
 import { SyncStatus } from '../types/certificate';
 import { CtuLogo } from './CtuLogo';
 
@@ -11,6 +11,8 @@ interface NavbarProps {
   isLoggedInGoogle: boolean;
   userEmail: string | null;
   isAdmin: boolean;
+  isDarkMode: boolean;
+  onToggleDarkMode: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -21,6 +23,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   isLoggedInGoogle,
   userEmail,
   isAdmin,
+  isDarkMode,
+  onToggleDarkMode,
 }) => {
   const isOfficerAuthorized = isAdmin || isLoggedInGoogle;
 
@@ -55,6 +59,25 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center space-x-2 shrink-0">
+          {/* Legacy / Windows XP High-Contrast Dark Mode Toggle */}
+          <button
+            type="button"
+            onClick={onToggleDarkMode}
+            className={`flex items-center space-x-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
+              isDarkMode
+                ? 'bg-amber-400 text-[#0b1120] border-amber-300 hover:bg-amber-300'
+                : 'bg-[#001d3d] hover:bg-[#003366] text-sky-200 border-sky-400/40'
+            }`}
+            title="Chuyển chế độ Nền tối / Nền sáng (Tối ưu hiển thị rõ nét trên trình duyệt cũ & Windows XP)"
+          >
+            {isDarkMode ? (
+              <Sun className="w-3.5 h-3.5" />
+            ) : (
+              <Moon className="w-3.5 h-3.5 text-amber-300" />
+            )}
+            <span className="hidden sm:inline">{isDarkMode ? 'Nền sáng' : 'Nền tối (XP)'}</span>
+          </button>
+
           {/* Active Mode Badge (Only visible to authenticated Admin) */}
           {isOfficerAuthorized && (
             <>

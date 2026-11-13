@@ -47,7 +47,7 @@ export const StudentDetailCard: React.FC<StudentDetailCardProps> = ({ record }) 
       </div>
 
       {/* Grid of Student & Certificate Fields */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+      <div className="ctu-detail-card-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* 1. Họ và tên người học */}
         <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70 hover:bg-blue-50/30 transition-colors">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
@@ -131,7 +131,7 @@ export const StudentDetailCard: React.FC<StudentDetailCardProps> = ({ record }) 
         <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70 hover:bg-blue-50/30 transition-colors">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-[#00529C]" />
-            Khóa đào tạo
+            Khóa
           </div>
           <div className="text-lg font-bold text-slate-900">
             {record.khoaHoc || 'Khóa chính quy'}
@@ -145,7 +145,7 @@ export const StudentDetailCard: React.FC<StudentDetailCardProps> = ({ record }) 
         <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70 hover:bg-blue-50/30 transition-colors">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
             <Briefcase className="w-4 h-4 text-[#00529C]" />
-            Ngành đào tạo
+            Ngành
           </div>
           <div className="text-base font-bold text-slate-900 leading-snug">
             {record.nganhDaoTao || 'Đại học Cần Thơ'}
@@ -159,7 +159,7 @@ export const StudentDetailCard: React.FC<StudentDetailCardProps> = ({ record }) 
         <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70 hover:bg-blue-50/30 transition-colors">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
             <Tag className="w-4 h-4 text-[#00529C]" />
-            Xếp loại / Kết quả
+            Xếp loại / Điểm thi
           </div>
           <div className="text-lg font-bold text-[#004B8D]">
             {record.xepLoai || 'Đạt yêu cầu'}
@@ -173,7 +173,7 @@ export const StudentDetailCard: React.FC<StudentDetailCardProps> = ({ record }) 
         <div className="bg-blue-50/80 rounded-2xl p-4 border border-blue-200 hover:bg-blue-50 transition-colors">
           <div className="text-xs font-semibold text-[#003B73] uppercase tracking-wider mb-1 flex items-center gap-1.5">
             <Shield className="w-4 h-4 text-[#00529C]" />
-            Số hiệu văn bằng
+            Số hiệu chứng chỉ
           </div>
           <div className="text-lg font-mono font-black text-[#002855] tracking-wider">
             {record.soHieuChungChi}
@@ -187,7 +187,7 @@ export const StudentDetailCard: React.FC<StudentDetailCardProps> = ({ record }) 
         <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200 hover:bg-amber-50 transition-colors">
           <div className="text-xs font-semibold text-amber-900 uppercase tracking-wider mb-1 flex items-center gap-1.5">
             <Bookmark className="w-4 h-4 text-amber-600" />
-            Số lưu vào sổ gốc
+            Số vào sổ gốc cấp chứng chỉ
           </div>
           <div className="text-lg font-mono font-black text-amber-950 tracking-wider">
             {record.soVaoSoGoc}
