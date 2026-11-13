@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, HelpCircle, PhoneCall, RefreshCw, CheckCircle, Search } from 'lucide-react';
+import { AlertTriangle, HelpCircle, Search } from 'lucide-react';
 
 interface NotFoundStateProps {
   searchedMssv: string;
@@ -10,14 +10,12 @@ interface NotFoundStateProps {
 
 export const NotFoundState: React.FC<NotFoundStateProps> = ({
   searchedMssv,
-  onRetry,
   sampleMssvs,
   onSelectSample,
 }) => {
   return (
-    <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xl border border-rose-200 text-center max-w-2xl mx-auto">
-      {/* Alert Icon */}
-      <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto mb-4 shadow-sm">
+    <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-lg border border-rose-200 text-center max-w-2xl mx-auto">
+      <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto mb-4 shadow-xs">
         <AlertTriangle className="w-8 h-8 text-rose-600" />
       </div>
 
@@ -29,38 +27,36 @@ export const NotFoundState: React.FC<NotFoundStateProps> = ({
       </h3>
 
       <p className="text-sm sm:text-base text-slate-600 mb-6 leading-relaxed">
-        Vui lòng kiểm tra lại chính xác Mã số sinh viên hoặc liên hệ trực tiếp Bộ phận quản lý cấp phát chứng chỉ Giáo dục Quốc phòng &amp; An ninh để được hỗ trợ kiểm tra sổ gốc.
+        Vui lòng kiểm tra lại chính xác Mã số sinh viên hoặc liên hệ Trung tâm Giáo dục Quốc phòng và An ninh — Đại học Cần Thơ để được hỗ trợ kiểm tra sổ gốc.
       </p>
 
-      {/* Helpful Checks */}
       <div className="text-left bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200/80 mb-6">
         <div className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-          <HelpCircle className="w-4 h-4 text-emerald-600" />
+          <HelpCircle className="w-4 h-4 text-[#00529C]" />
           Gợi ý kiểm tra:
         </div>
         <ul className="space-y-2 text-xs sm:text-sm text-slate-600">
           <li className="flex items-start gap-2">
-            <span className="text-emerald-600 font-bold">•</span>
+            <span className="text-[#00529C] font-bold">•</span>
             <span>
-              Đảm bảo MSSV đúng định dạng của trường (ví dụ: <strong className="font-mono text-slate-800">B2101234</strong> thay vì gõ nhầm chữ O và số 0).
+              Đảm bảo MSSV đúng định dạng của Đại học Cần Thơ (ví dụ: <strong className="font-mono text-slate-800">B2101234</strong>, tránh nhầm chữ O và số 0).
             </span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-emerald-600 font-bold">•</span>
+            <span className="text-[#00529C] font-bold">•</span>
             <span>
-              Nếu bạn thuộc đợt học bù hoặc xét tốt nghiệp đợt muộn, danh sách có thể nằm ở file đợt bổ sung.
+              Nếu bạn thuộc đợt học bù hoặc xét cấp bổ sung, danh sách có thể đang được cán bộ cập nhật lên hệ thống.
             </span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-emerald-600 font-bold">•</span>
+            <span className="text-[#00529C] font-bold">•</span>
             <span>
-              Hãy đến bàn tiếp nhận của Cán bộ GDQP mang theo Thẻ sinh viên hoặc CCCD để tra cứu thủ công trên hệ thống máy chủ.
+              Vui lòng mang theo Thẻ sinh viên hoặc CCCD đến bàn tiếp nhận của Cán bộ GDQP&amp;AN để kiểm tra trực tiếp trên sổ gốc.
             </span>
           </li>
         </ul>
       </div>
 
-      {/* Sample Quick Try */}
       <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="text-xs text-slate-500 flex items-center gap-1.5">
           <Search className="w-3.5 h-3.5 text-slate-400" />
@@ -71,7 +67,7 @@ export const NotFoundState: React.FC<NotFoundStateProps> = ({
             <button
               key={sample}
               onClick={() => onSelectSample(sample)}
-              className="text-xs font-mono font-bold bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 border border-slate-200 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+              className="text-xs font-mono font-bold bg-slate-100 hover:bg-blue-50 hover:text-[#004B8D] hover:border-blue-300 border border-slate-200 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
             >
               {sample}
             </button>

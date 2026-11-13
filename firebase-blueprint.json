@@ -5,56 +5,81 @@
       "description": "Bản ghi chứng chỉ Giáo dục Quốc phòng và An ninh theo từng sinh viên",
       "type": "object",
       "properties": {
-        "stt": { "type": "string", "description": "Số thứ tự lưu phôi bằng" },
-        "soHieuChungChi": { "type": "string", "description": "Số văn bằng in trên phôi" },
-        "soVaoSoGoc": { "type": "string", "description": "Số vào sổ gốc cấp chứng chỉ" },
-        "tenChungChi": { "type": "string", "description": "Tên loại chứng chỉ" },
-        "hoVaTen": { "type": "string", "description": "Họ và tên người học" },
-        "mssv": { "type": "string", "description": "Mã số sinh viên (Khóa chính)" },
-        "ngaySinh": { "type": "string", "description": "Ngày tháng năm sinh" },
-        "noiSinh": { "type": "string", "description": "Nơi sinh" },
-        "gioiTinh": { "type": "string", "description": "Giới tính (Nam/Nữ)" },
-        "danToc": { "type": "string", "description": "Dân tộc" },
-        "khoaHoc": { "type": "string", "description": "Khóa đào tạo" },
-        "nganhDaoTao": { "type": "string", "description": "Ngành đào tạo" },
-        "xepLoai": { "type": "string", "description": "Xếp loại kết quả học tập" },
-        "ngayCap": { "type": "string", "description": "Ngày cấp chứng chỉ" },
-        "donViCap": { "type": "string", "description": "Đơn vị cấp phát" },
-        "fileName": { "type": "string", "description": "Tên file Excel nguồn" }
+        "id": { "type": "string", "maxLength": 128 },
+        "stt": { "type": "string", "maxLength": 32, "description": "Số thứ tự lưu phôi bằng" },
+        "soHieuChungChi": { "type": "string", "maxLength": 100, "description": "Số hiệu văn bằng in trên phôi" },
+        "soVaoSoGoc": { "type": "string", "maxLength": 100, "description": "Số lưu vào sổ gốc cấp chứng chỉ" },
+        "tenChungChi": { "type": "string", "maxLength": 200, "description": "Tên loại chứng chỉ" },
+        "hoVaTen": { "type": "string", "maxLength": 150, "description": "Họ và tên người học" },
+        "mssv": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$", "description": "Mã số sinh viên (Khóa chính)" },
+        "ngaySinh": { "type": "string", "maxLength": 50, "description": "Ngày tháng năm sinh" },
+        "noiSinh": { "type": "string", "maxLength": 150, "description": "Nơi sinh" },
+        "gioiTinh": { "type": "string", "maxLength": 30, "description": "Giới tính (Nam/Nữ)" },
+        "danToc": { "type": "string", "maxLength": 50, "description": "Dân tộc" },
+        "khoaHoc": { "type": "string", "maxLength": 100, "description": "Khóa đào tạo" },
+        "nganhDaoTao": { "type": "string", "maxLength": 150, "description": "Ngành đào tạo" },
+        "xepLoai": { "type": "string", "maxLength": 60, "description": "Xếp loại kết quả học tập" },
+        "ngayCap": { "type": "string", "maxLength": 60, "description": "Ngày cấp chứng chỉ" },
+        "donViCap": { "type": "string", "maxLength": 200, "description": "Đơn vị cấp phát" },
+        "fileName": { "type": "string", "maxLength": 255, "description": "Tên file Excel nguồn" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Thời gian cập nhật ISO" }
       },
-      "required": ["stt", "mssv", "hoVaTen", "ngayCap"]
+      "required": ["mssv", "hoVaTen", "soHieuChungChi", "soVaoSoGoc"]
     },
     "SyncMeta": {
       "title": "SyncMeta",
       "description": "Siêu dữ liệu thống kê trạng thái đồng bộ",
       "type": "object",
       "properties": {
-        "source": { "type": "string" },
+        "source": { "type": "string", "maxLength": 50 },
         "totalRecords": { "type": "number" },
-        "lastUpdated": { "type": "string" },
+        "lastUpdated": { "type": "string", "maxLength": 64 },
         "fileCount": { "type": "number" },
         "fileNames": { "type": "array" }
-      }
+      },
+      "required": ["source", "totalRecords", "lastUpdated", "fileCount", "fileNames"]
     },
     "SearchHistoryRecord": {
       "title": "SearchHistoryRecord",
       "description": "Lịch sử sinh viên tra cứu chứng chỉ phục vụ cán bộ cấp phát theo dõi",
       "type": "object",
       "properties": {
-        "mssv": { "type": "string" },
-        "hoVaTen": { "type": "string" },
-        "stt": { "type": "string" },
-        "ngayCap": { "type": "string" },
-        "soHieuChungChi": { "type": "string" },
-        "soVaoSoGoc": { "type": "string" },
-        "tenChungChi": { "type": "string" },
-        "donViCap": { "type": "string" },
-        "timestamp": { "type": "string" },
-        "timeFormatted": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "mssv": { "type": "string", "maxLength": 64 },
+        "hoVaTen": { "type": "string", "maxLength": 150 },
+        "stt": { "type": "string", "maxLength": 32 },
+        "ngayCap": { "type": "string", "maxLength": 60 },
+        "soHieuChungChi": { "type": "string", "maxLength": 100 },
+        "soVaoSoGoc": { "type": "string", "maxLength": 100 },
+        "tenChungChi": { "type": "string", "maxLength": 200 },
+        "donViCap": { "type": "string", "maxLength": 200 },
+        "khoaHoc": { "type": "string", "maxLength": 100 },
+        "nganhDaoTao": { "type": "string", "maxLength": 150 },
+        "ngaySinh": { "type": "string", "maxLength": 50 },
+        "noiSinh": { "type": "string", "maxLength": 150 },
+        "gioiTinh": { "type": "string", "maxLength": 30 },
+        "danToc": { "type": "string", "maxLength": 50 },
+        "xepLoai": { "type": "string", "maxLength": 60 },
+        "fileName": { "type": "string", "maxLength": 255 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "timeFormatted": { "type": "string", "maxLength": 64 },
         "daPhat": { "type": "boolean" },
-        "status": { "type": "string" }
+        "ngayPhat": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["found", "not_found"] }
       },
-      "required": ["mssv", "timestamp"]
+      "required": ["id", "mssv", "hoVaTen", "timestamp", "daPhat", "status"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Danh sách cán bộ quản trị được phép ghi/xóa chứng chỉ trên Firestore",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "email", "role"]
     }
   },
   "firestore": {
@@ -69,6 +94,10 @@
     "/gdqp_search_history/{historyId}": {
       "schema": "SearchHistoryRecord",
       "description": "Lịch sử tra cứu cấp phát chứng chỉ"
+    },
+    "/admins/{uid}": {
+      "schema": "AdminUser",
+      "description": "Tài khoản cán bộ quản trị hệ thống"
     }
   }
 }

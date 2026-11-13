@@ -1,72 +1,90 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  User, 
-  signOut 
+import {
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  User,
+  signOut,
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { auth } from './firebaseConfig';
 
-// Initialize Firebase App singleton safely
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
+export { auth };
 
-const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-provider.setCustomParameters({
+const driveProvider = new GoogleAuthProvider();
+driveProvider.addScope('https://www.googleapis.com/auth/drive.readonly');
+driveProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
-// Flag to track ongoing sign-in flow
-let isSigningIn = false;
-// Token cached strictly in memory as per Workspace skill instructions
-let cachedAccessToken: string | null = null;
+const adminGoogleProvider = new GoogleAuthProvider();
+adminGoogleProvider.setCustomParameters({
+  prompt: 'select_account',
+});
+
+// Token Google Drive được lưu tạm trong RAM (không ghi ra localStorage)
+let cachedDriveAccessToken: string | null = null;
 
 export const initAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
+  onAuthSuccess?: (user: User, driveToken: string | null) => void,
   onAuthFailure?: () => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  return onAuthStateChanged(auth, (user: User | null) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
-      }
+      if (onAuthSuccess) onAuthSuccess(user, cachedDriveAccessToken);
     } else {
-      cachedAccessToken = null;
+      cachedDriveAccessToken = null;
       if (onAuthFailure) onAuthFailure();
     }
   });
 };
 
+/**
+ * Đăng nhập Google cho Cán bộ Quản trị (Firebase Auth)
+ */
+export const googleSignInAdmin = async (): Promise<{ user: User }> => {
+  const result = await signInWithPopup(auth, adminGoogleProvider);
+  return { user: result.user };
+};
+
+/**
+ * Đăng nhập Google kèm quyền đọc Google Drive (để quét thư mục Drive)
+ */
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, driveProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
-      throw new Error('Không thể lấy Access Token từ Firebase Auth');
+      throw new Error('Không thể lấy Access Token Google Drive từ Firebase Auth');
     }
 
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    cachedDriveAccessToken = credential.accessToken;
+    return { user: result.user, accessToken: cachedDriveAccessToken };
   } catch (error: unknown) {
     console.error('Lỗi đăng nhập Google Workspace:', error);
     throw error;
-  } finally {
-    isSigningIn = false;
   }
 };
 
+/**
+ * Đăng nhập bằng Email và Mật khẩu qua Firebase Authentication
+ */
+export const emailSignInAdmin = async (
+  email: string,
+  password: string
+): Promise<{ user: User }> => {
+  const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return { user: result.user };
+};
+
+export const getCurrentFirebaseUser = (): User | null => {
+  return auth.currentUser;
+};
+
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+  return cachedDriveAccessToken;
 };
 
 export const logoutGoogle = async () => {
   await signOut(auth);
-  cachedAccessToken = null;
+  cachedDriveAccessToken = null;
 };

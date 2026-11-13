@@ -199,6 +199,29 @@ export function cacheRecord(record: CertificateRecord): void {
 }
 
 /**
+ * Remove a single record from local cache and update status count
+ */
+export function removeLocalRecord(mssv: string, newCloudTotal?: number): void {
+  if (!mssv) return;
+  const cleanMssv = mssv.trim().toUpperCase();
+  recordsIndex.delete(cleanMssv);
+
+  try {
+    const subset = Array.from(recordsIndex.values()).slice(-1500);
+    localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(subset));
+  } catch {
+    // ignore quota error
+  }
+
+  const currentStatus = getSyncStatus();
+  saveSyncStatus({
+    ...currentStatus,
+    totalRecords: typeof newCloudTotal === 'number' ? newCloudTotal : recordsIndex.size,
+    lastUpdated: new Date().toLocaleString('vi-VN'),
+  });
+}
+
+/**
  * 100% Exact match lookup by MSSV (< 1ms)
  * Automatically trims whitespace and capitalizes query
  */

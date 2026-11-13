@@ -1,19 +1,153 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Cho phép tra cứu chứng chỉ theo từng MSSV và cán bộ cập nhật danh sách
+    // 1. Global Safety Net: Mặc định từ chối tất cả truy cập không hợp lệ
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== HELPER FUNCTIONS ====================
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Admin mặc định (Bootstrapped Admin) - Không tốn lượt đọc DB khi list
+    function isBootstrappedAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'pvtruyen@ctu.edu.vn';
+    }
+
+    // Admin đầy đủ: Bootstrapped Admin HOẶC UID nằm trong collection /admins
+    function isAdmin() {
+      return isBootstrappedAdmin()
+        || (isSignedIn() && request.auth.token.email_verified == true && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isOptionalStr(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isValidCertificate(data) {
+      return data.keys().hasAll(['mssv', 'hoVaTen', 'soHieuChungChi', 'soVaoSoGoc'])
+        && data.keys().hasOnly([
+          'id', 'stt', 'soHieuChungChi', 'soVaoSoGoc', 'tenChungChi',
+          'hoVaTen', 'mssv', 'ngaySinh', 'noiSinh', 'gioiTinh', 'danToc',
+          'khoaHoc', 'nganhDaoTao', 'xepLoai', 'ngayCap', 'donViCap',
+          'fileName', 'updatedAt'
+        ])
+        && data.mssv is string && data.mssv.size() > 0 && data.mssv.size() <= 64
+        && data.hoVaTen is string && data.hoVaTen.size() > 0 && data.hoVaTen.size() <= 150
+        && data.soHieuChungChi is string && data.soHieuChungChi.size() <= 100
+        && data.soVaoSoGoc is string && data.soVaoSoGoc.size() <= 100
+        && (!('stt' in data) || data.stt is int || data.stt is float || (data.stt is string && data.stt.size() <= 32))
+        && isOptionalStr(data, 'id', 128)
+        && isOptionalStr(data, 'tenChungChi', 200)
+        && isOptionalStr(data, 'ngaySinh', 50)
+        && isOptionalStr(data, 'noiSinh', 150)
+        && isOptionalStr(data, 'gioiTinh', 30)
+        && isOptionalStr(data, 'danToc', 50)
+        && isOptionalStr(data, 'khoaHoc', 100)
+        && isOptionalStr(data, 'nganhDaoTao', 150)
+        && isOptionalStr(data, 'xepLoai', 60)
+        && isOptionalStr(data, 'ngayCap', 60)
+        && isOptionalStr(data, 'donViCap', 200)
+        && isOptionalStr(data, 'fileName', 255)
+        && isOptionalStr(data, 'updatedAt', 64);
+    }
+
+    function isValidSyncMeta(data) {
+      return data.keys().hasAll(['source', 'totalRecords', 'lastUpdated', 'fileCount', 'fileNames'])
+        && data.keys().hasOnly(['source', 'totalRecords', 'lastUpdated', 'fileCount', 'fileNames', 'appsScriptUrl', 'driveFolderFound'])
+        && data.source is string && data.source.size() <= 50
+        && (data.totalRecords is int || data.totalRecords is float) && data.totalRecords >= 0
+        && data.lastUpdated is string && data.lastUpdated.size() <= 64
+        && (data.fileCount is int || data.fileCount is float) && data.fileCount >= 0
+        && data.fileNames is list && data.fileNames.size() <= 500
+        && (data.fileNames.size() == 0 || data.fileNames[0] is string);
+    }
+
+    function isValidSearchHistory(data) {
+      return data.keys().hasAll(['id', 'mssv', 'hoVaTen', 'timestamp', 'daPhat', 'status'])
+        && data.keys().hasOnly([
+          'id', 'mssv', 'hoVaTen', 'stt', 'ngayCap', 'soHieuChungChi', 'soVaoSoGoc',
+          'tenChungChi', 'donViCap', 'khoaHoc', 'nganhDaoTao', 'ngaySinh', 'noiSinh',
+          'gioiTinh', 'danToc', 'xepLoai', 'fileName', 'timestamp', 'timeFormatted',
+          'daPhat', 'ngayPhat', 'status'
+        ])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.mssv is string && data.mssv.size() > 0 && data.mssv.size() <= 64
+        && data.hoVaTen is string && data.hoVaTen.size() > 0 && data.hoVaTen.size() <= 150
+        && (!('stt' in data) || data.stt is int || data.stt is float || (data.stt is string && data.stt.size() <= 32))
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && data.daPhat is bool
+        && data.status in ['found', 'not_found']
+        && (!('ngayPhat' in data) || data.ngayPhat == null || (data.ngayPhat is string && data.ngayPhat.size() <= 64))
+        && isOptionalStr(data, 'ngayCap', 60)
+        && isOptionalStr(data, 'soHieuChungChi', 100)
+        && isOptionalStr(data, 'soVaoSoGoc', 100)
+        && isOptionalStr(data, 'tenChungChi', 200)
+        && isOptionalStr(data, 'donViCap', 200)
+        && isOptionalStr(data, 'khoaHoc', 100)
+        && isOptionalStr(data, 'nganhDaoTao', 150)
+        && isOptionalStr(data, 'ngaySinh', 50)
+        && isOptionalStr(data, 'noiSinh', 150)
+        && isOptionalStr(data, 'gioiTinh', 30)
+        && isOptionalStr(data, 'danToc', 50)
+        && isOptionalStr(data, 'xepLoai', 60)
+        && isOptionalStr(data, 'fileName', 255)
+        && isOptionalStr(data, 'timeFormatted', 64);
+    }
+
+    // ==================== COLLECTION RULES ====================
+
+    // 1. Danh bạ chứng chỉ: Khách chỉ được tra cứu chính xác từng MSSV (get).
+    // Cán bộ quản trị (Admin) mới được duyệt danh sách (list), thêm/sửa/cộng dồn (write) và xóa (delete).
     match /gdqp_certificates/{mssv} {
-      allow read, write: if true;
+      allow get: if isValidId(mssv);
+      allow list: if isBootstrappedAdmin() && resource.data.mssv is string;
+      allow create, update: if isAdmin() && isValidId(mssv) && isValidCertificate(incoming());
+      allow delete: if isAdmin() && isValidId(mssv);
     }
 
-    // Thông tin trạng thái đồng bộ và siêu dữ liệu hệ thống
+    // 2. Siêu dữ liệu đồng bộ (tổng số bản ghi, ngày cập nhật)
     match /gdqp_meta/{metaId} {
-      allow read, write: if true;
+      allow get: if isValidId(metaId);
+      allow list: if isBootstrappedAdmin() && resource.data.source is string;
+      allow create, update: if isAdmin() && isValidId(metaId) && isValidSyncMeta(incoming());
+      allow delete: if isAdmin() && isValidId(metaId);
     }
 
-    // Lịch sử tra cứu chứng chỉ phục vụ cán bộ cấp phát theo dõi
+    // 3. Lịch sử tra cứu: Khách được tạo log tra cứu hợp lệ (daPhat = false),
+    // chỉ Cán bộ Admin mới được xem lịch sử, đánh dấu đã phát, hoặc xóa.
     match /gdqp_search_history/{historyId} {
-      allow read, write: if true;
+      allow get: if isAdmin() && isValidId(historyId);
+      allow list: if isBootstrappedAdmin() && resource.data.mssv is string;
+      allow create: if isValidId(historyId) && isValidSearchHistory(incoming()) && incoming().daPhat == false;
+      allow update: if isAdmin()
+        && isValidId(historyId)
+        && isValidSearchHistory(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['daPhat', 'ngayPhat']);
+      allow delete: if isAdmin() && isValidId(historyId);
+    }
+
+    // 4. Danh sách tài khoản Cán bộ Quản trị
+    match /admins/{uid} {
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow create, update, delete: if isBootstrappedAdmin() && isValidId(uid);
     }
   }
 }

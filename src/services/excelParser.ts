@@ -136,10 +136,16 @@ export function parseExcelFile(
   data: ArrayBuffer | Uint8Array,
   fileName: string = 'GDQP_Data.xlsx'
 ): CertificateRecord[] {
-  const workbook = XLSX.read(data, {
-    type: 'array',
-    cellDates: true,
-  });
+  const isCsv = fileName.toLowerCase().endsWith('.csv');
+  const workbook = isCsv
+    ? XLSX.read(new TextDecoder('utf-8').decode(data instanceof Uint8Array ? data : new Uint8Array(data)), {
+        type: 'string',
+        cellDates: true,
+      })
+    : XLSX.read(data, {
+        type: 'array',
+        cellDates: true,
+      });
 
   const records: CertificateRecord[] = [];
 

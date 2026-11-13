@@ -1,6 +1,6 @@
 {
   "name": "Tra Cứu Chứng Chỉ GDQP&AN",
-  "description": "Hệ thống tra cứu số thứ tự và ngày cấp chứng chỉ Giáo dục Quốc phòng và An ninh theo Mã số sinh viên (MSSV) tích hợp Google Drive và Excel.",
+  "description": "Hệ thống tra cứu và quản lý chứng chỉ Giáo dục Quốc phòng và An ninh Đại học Cần Thơ theo Mã số sinh viên (MSSV), đồng bộ Cloud Firestore và nạp cộng dồn từ file Excel.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
