@@ -1,5 +1,5 @@
 import { parseExcelFile } from './excelParser';
-import { CertificateRecord, DriveFileInfo } from '../types/certificate';
+import { CertificateRecord, DriveFileDiagnostic, DriveFileInfo } from '../types/certificate';
 
 interface ScanProgressCallback {
   (message: string, progressPercent: number): void;
@@ -40,7 +40,6 @@ export async function findGdqpFolder(accessToken: string): Promise<{ folderId: s
     const pData = await pRes.json();
     if (pData.files && pData.files.length > 0) {
       const parentId = pData.files[0].id;
-      // Search subfolders inside GDQP
       const subSearchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
         `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
       )}&fields=files(id,name)&pageSize=10`;
@@ -63,19 +62,19 @@ export async function findGdqpFolder(accessToken: string): Promise<{ folderId: s
 }
 
 /**
- * List all Excel (.xlsx, .xls) and Google Sheets files inside the given folder
+ * List all Excel (.xlsx, .xls, .csv) and Google Sheets files inside the given folder
  */
 export async function listFolderFiles(accessToken: string, folderId: string): Promise<DriveFileInfo[]> {
   const headers = { Authorization: `Bearer ${accessToken}` };
-  const query = `'${folderId}' in parents and trashed = false and (mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType = 'application/vnd.ms-excel' or mimeType = 'application/vnd.google-apps.spreadsheet' or name contains '.xlsx' or name contains '.xls')`;
-  
+  const query = `'${folderId}' in parents and trashed = false and (mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType = 'application/vnd.ms-excel' or mimeType = 'application/vnd.google-apps.spreadsheet' or mimeType = 'text/csv' or name contains '.xlsx' or name contains '.xls' or name contains '.csv')`;
+
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
     query
   )}&fields=files(id,name,mimeType,size,modifiedTime)&pageSize=100`;
 
   const res = await fetch(url, { headers });
   if (!res.ok) {
-    throw new Error(`Không thể đọc danh sách file từ thư mục Drive: ${res.statusText}`);
+    throw new Error(`Không thể đọc danh sách file từ thư mục Drive (${res.status}): ${res.statusText}`);
   }
 
   const data = await res.json();
@@ -106,35 +105,40 @@ export async function downloadDriveFile(
 
   const res = await fetch(downloadUrl, { headers });
   if (!res.ok) {
-    throw new Error(`Lỗi tải file từ Google Drive: ${res.statusText}`);
+    throw new Error(`Lỗi tải file từ Google Drive (${res.status}): ${res.statusText}`);
   }
 
   return await res.arrayBuffer();
 }
 
 /**
- * Scan all files in the GDQP folder and extract certificate records
+ * Scan all files in the GDQP folder and extract certificate records with per-file diagnostics
  */
 export async function scanDriveFolderForCertificates(
   accessToken: string,
   folderId: string,
   onProgress?: ScanProgressCallback
-): Promise<{ records: CertificateRecord[]; filesScanned: string[] }> {
-  if (onProgress) onProgress('Đang quét danh sách file Excel trong thư mục...', 10);
+): Promise<{
+  records: CertificateRecord[];
+  filesScanned: string[];
+  fileDiagnostics: DriveFileDiagnostic[];
+}> {
+  if (onProgress) onProgress('Đang quét danh sách file Excel trong thư mục Google Drive...', 10);
 
   const files = await listFolderFiles(accessToken, folderId);
   if (files.length === 0) {
-    return { records: [], filesScanned: [] };
+    return { records: [], filesScanned: [], fileDiagnostics: [] };
   }
 
   const allRecords: CertificateRecord[] = [];
   const filesScanned: string[] = [];
+  const fileDiagnostics: DriveFileDiagnostic[] = [];
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const progress = Math.round(15 + ((i + 1) / files.length) * 80);
     if (onProgress) {
-      onProgress(`Đang xử lý dữ liệu: ${file.name} (${i + 1}/${files.length})...`, progress);
+      onProgress(`Đang tải & phân tích: ${file.name} (${i + 1}/${files.length})...`, progress);
     }
 
     try {
@@ -142,12 +146,31 @@ export async function scanDriveFolderForCertificates(
       const fileRecords = parseExcelFile(buffer, file.name);
       allRecords.push(...fileRecords);
       filesScanned.push(file.name);
-    } catch (err) {
+      fileDiagnostics.push({
+        name: file.name,
+        mimeType: file.mimeType,
+        rowCount: fileRecords.length,
+        status: fileRecords.length > 0 ? 'connected' : 'empty',
+        ...(fileRecords.length === 0
+          ? { error: 'Không nhận diện được cột MSSV / Họ tên trong file này.' }
+          : {}),
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi đọc file';
       console.warn(`Lỗi đọc file ${file.name}:`, err);
+      fileDiagnostics.push({
+        name: file.name,
+        mimeType: file.mimeType,
+        rowCount: 0,
+        status: 'error',
+        error: msg,
+      });
     }
   }
 
-  if (onProgress) onProgress(`Hoàn tất số hóa ${allRecords.length} chứng chỉ từ ${filesScanned.length} file!`, 100);
+  if (onProgress) {
+    onProgress(`Hoàn tất tải ${allRecords.length.toLocaleString('vi-VN')} chứng chỉ từ ${filesScanned.length} file!`, 100);
+  }
 
-  return { records: allRecords, filesScanned };
+  return { records: allRecords, filesScanned, fileDiagnostics };
 }

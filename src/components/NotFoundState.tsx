@@ -6,12 +6,14 @@ interface NotFoundStateProps {
   onRetry: () => void;
   sampleMssvs: string[];
   onSelectSample: (mssv: string) => void;
+  diagnosticMessage?: string | null;
 }
 
 export const NotFoundState: React.FC<NotFoundStateProps> = ({
   searchedMssv,
   sampleMssvs,
   onSelectSample,
+  diagnosticMessage,
 }) => {
   return (
     <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-lg border border-rose-200 text-center max-w-2xl mx-auto">
@@ -20,15 +22,22 @@ export const NotFoundState: React.FC<NotFoundStateProps> = ({
       </div>
 
       <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
-        Không tìm thấy dữ liệu chứng chỉ cho MSSV:{' '}
+        Không tìm thấy dữ liệu chứng chỉ cho:{' '}
         <span className="font-mono text-rose-600 underline decoration-rose-300 decoration-2">
           {searchedMssv}
         </span>
       </h3>
 
-      <p className="text-sm sm:text-base text-slate-600 mb-6 leading-relaxed">
-        Vui lòng kiểm tra lại chính xác Mã số sinh viên hoặc liên hệ Trung tâm Giáo dục Quốc phòng và An ninh — Đại học Cần Thơ để được hỗ trợ kiểm tra sổ gốc.
-      </p>
+      {diagnosticMessage ? (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs sm:text-sm text-left leading-relaxed">
+          <strong className="block text-amber-900 mb-1">Chẩn đoán nguồn dữ liệu (Chế độ 2 - Google Drive):</strong>
+          <span>{diagnosticMessage}</span>
+        </div>
+      ) : (
+        <p className="text-sm sm:text-base text-slate-600 mb-6 leading-relaxed">
+          Vui lòng kiểm tra lại chính xác Mã số sinh viên hoặc Họ và tên, hoặc liên hệ Trung tâm Giáo dục Quốc phòng và An ninh — Đại học Cần Thơ để được hỗ trợ kiểm tra sổ gốc.
+        </p>
+      )}
 
       <div className="text-left bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200/80 mb-6">
         <div className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">

@@ -17,6 +17,8 @@ import { CtuLogo } from './components/CtuLogo';
 import { CertificateRecord, SyncStatus } from './types/certificate';
 import {
   initStorage,
+  hydrateFromIndexedDb,
+  getLoadedCount,
   lookupByMssv,
   lookupByMssvOrName,
   cacheRecord,
@@ -51,6 +53,8 @@ import {
   Trash2,
   Users,
   AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function App() {
@@ -70,27 +74,30 @@ export default function App() {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [adminActionTarget, setAdminActionTarget] = useState<'data_source' | 'history' | null>(null);
   const [firebaseRefreshTick, setFirebaseRefreshTick] = useState(0);
+  const [searchDiagnostic, setSearchDiagnostic] = useState<string | null>(null);
   const [isWriteQuotaExhausted, setIsWriteQuotaExhausted] = useState(() =>
     hasFirestoreWriteQuotaExceeded()
   );
 
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
   const isOfficerAuthorized = isAdminAuthenticated || isLoggedInGoogle;
-  const activeMode: 'firebase' | 'drive' = syncStatus.source === 'apps_script' ? 'drive' : 'firebase';
+  const activeMode: 'firebase' | 'drive' =
+    syncStatus.source === 'apps_script' || syncStatus.source === 'drive_oauth'
+      ? 'drive'
+      : 'firebase';
 
   const refreshCloudMeta = useCallback(async () => {
     try {
+      const current = getSyncStatus();
+      // Khi đang sử dụng Chế độ 2 (Google Drive), giữ nguyên thống kê file Drive, không để Firestore ghi đè
+      if (current.source === 'apps_script' || current.source === 'drive_oauth') {
+        return;
+      }
       await testFirestoreConnection();
       const cloudMeta = await fetchCloudSyncStatus();
       if (cloudMeta && cloudMeta.totalRecords >= 0) {
-        const current = getSyncStatus();
-        // Keep user's selected mode if they switched to Apps Script Drive mode
-        const merged: SyncStatus =
-          current.source === 'apps_script'
-            ? { ...cloudMeta, source: 'apps_script', appsScriptUrl: getSavedAppsScriptUrl() }
-            : cloudMeta;
-        setSyncStatus(merged);
-        saveSyncStatus(merged);
+        setSyncStatus(cloudMeta);
+        saveSyncStatus(cloudMeta);
       }
     } catch (err) {
       console.warn('Đang sử dụng bộ nhớ đệm cục bộ:', err);
@@ -99,6 +106,14 @@ export default function App() {
 
   useEffect(() => {
     initStorage();
+    hydrateFromIndexedDb().then((loadedTotal) => {
+      const st = getSyncStatus();
+      if (loadedTotal > 0 && st.source !== 'demo_data' && st.totalRecords !== loadedTotal) {
+        const updated = { ...st, totalRecords: loadedTotal };
+        saveSyncStatus(updated);
+        setSyncStatus(updated);
+      }
+    });
     setSyncStatus(getSyncStatus());
     setIsAdminAuthenticated(isAdminSessionActive());
     refreshCloudMeta();
@@ -170,7 +185,12 @@ export default function App() {
   };
 
   const handleQuickSwitchMode = (mode: 'firebase' | 'drive') => {
-    if (mode === 'drive' && !getSavedAppsScriptUrl()) {
+    const hasLoadedDriveData =
+      (syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') &&
+      getLoadedCount() > 0;
+    if (mode === 'drive' && !getSavedAppsScriptUrl() && !hasLoadedDriveData) {
+      const updated = switchDataSourceMode('drive');
+      setSyncStatus(updated);
       openModalWithTab('drive_config');
       return;
     }
@@ -189,40 +209,91 @@ export default function App() {
     setResult(null);
     setMatchingList([]);
     setNotFoundMssv(null);
+    setSearchDiagnostic(null);
 
     const appsScriptUrl = getSavedAppsScriptUrl();
-    if (syncStatus.source === 'apps_script' && appsScriptUrl) {
-      try {
-        const response = await queryAppsScript(appsScriptUrl, trimmed);
-        if (response.success && response.found && response.data) {
-          setResult(response.data);
-          setNotFoundMssv(null);
-          recordSearchEvent(response.data, response.data.mssv || cleanUpper).catch(console.warn);
-        } else {
-          const localMatches = lookupByMssvOrName(trimmed);
-          if (localMatches.length === 1) {
-            setResult(localMatches[0]);
-            recordSearchEvent(localMatches[0], localMatches[0].mssv).catch(console.warn);
-          } else if (localMatches.length > 1) {
-            setMatchingList(localMatches);
+    if (activeMode === 'drive') {
+      // 1. Tìm tức thì trong bộ nhớ dữ liệu Drive đã tải về (từ Quét Drive 1-Click hoặc Apps Script Sync)
+      const isDriveIndexLoaded =
+        (syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') &&
+        getLoadedCount() > 0 &&
+        syncStatus.totalRecords > 0;
+
+      if (isDriveIndexLoaded) {
+        const localDriveMatches = lookupByMssvOrName(trimmed);
+        if (localDriveMatches.length === 1) {
+          setResult(localDriveMatches[0]);
+          recordSearchEvent(localDriveMatches[0], localDriveMatches[0].mssv).catch(console.warn);
+          setIsSearching(false);
+          return;
+        }
+        if (localDriveMatches.length > 1) {
+          setMatchingList(localDriveMatches);
+          setIsSearching(false);
+          return;
+        }
+      }
+
+      // 2. Nếu chưa có trong bộ nhớ đệm và có link Apps Script, truy vấn trực tiếp Google Drive
+      if (appsScriptUrl) {
+        try {
+          const response = await queryAppsScript(appsScriptUrl, trimmed);
+          if (!response.success) {
+            setNotFoundMssv(trimmed);
+            setSearchDiagnostic(
+              response.error ||
+                'Không thể đọc dữ liệu từ Google Apps Script. Hãy mở Cài đặt Kết nối -> tab 2. Google Drive -> bấm "Kiểm tra & Nạp dữ liệu" để xem trạng thái từng file.'
+            );
+            setIsSearching(false);
+            return;
+          }
+
+          const matches =
+            response.matches && response.matches.length > 0
+              ? response.matches
+              : response.data
+              ? [response.data]
+              : [];
+
+          if (matches.length === 1) {
+            cacheRecord(matches[0]);
+            setResult(matches[0]);
+            recordSearchEvent(matches[0], matches[0].mssv || cleanUpper).catch(console.warn);
+          } else if (matches.length > 1) {
+            matches.forEach(cacheRecord);
+            setMatchingList(matches);
           } else {
+            const errorFiles = (response.files || []).filter((f) => f.status === 'error');
+            if (errorFiles.length > 0) {
+              setSearchDiagnostic(
+                `Có ${errorFiles.length} file Excel trong Drive bị lỗi đọc dữ liệu: ${errorFiles.map((f) => `${f.name} (${f.error})`).join('; ')}`
+              );
+            } else if ((response.files || []).length === 0) {
+              setSearchDiagnostic(
+                'Apps Script đã kết nối nhưng chưa thấy file Excel (.xlsx, .xls, .csv) hoặc Google Sheets nào trong thư mục "Số hóa chứng chỉ".'
+              );
+            }
             setNotFoundMssv(trimmed);
             recordSearchEvent(null, cleanUpper).catch(console.warn);
           }
-        }
-      } catch (err) {
-        console.error('Lỗi tra cứu Google Drive Apps Script:', err);
-        const localMatches = lookupByMssvOrName(trimmed);
-        if (localMatches.length === 1) {
-          setResult(localMatches[0]);
-        } else if (localMatches.length > 1) {
-          setMatchingList(localMatches);
-        } else {
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Lỗi kết nối Google Apps Script';
           setNotFoundMssv(trimmed);
+          setSearchDiagnostic(`Lỗi kết nối Google Apps Script: ${msg}`);
+        } finally {
+          setIsSearching(false);
         }
-      } finally {
-        setIsSearching(false);
+        return;
       }
+
+      // 3. Chế độ 2 chưa kết nối file nào
+      if (!isDriveIndexLoaded) {
+        setSearchDiagnostic(
+          'Chế độ 2 (Google Drive) hiện chưa tải dữ liệu từ file Excel nào. Vui lòng bấm "Cài đặt Kết nối" -> tab "2. Google Drive" -> bấm "Quét & Tải Excel (1-Click)" hoặc dán link Apps Script Web App.'
+        );
+      }
+      setNotFoundMssv(trimmed);
+      setIsSearching(false);
       return;
     }
 
@@ -377,6 +448,46 @@ export default function App() {
               </button>
             </div>
           </div>
+          {activeMode === 'drive' && (
+            <div className="bg-sky-50 border-t border-sky-200 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-slate-800">
+              <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  {(syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-0.5">
+                    <div>
+                      {(syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0 ? (
+                        <>
+                          <strong className="text-emerald-800">
+                            Đã kết nối Google Drive ({syncStatus.fileCount} file • {syncStatus.totalRecords.toLocaleString('vi-VN')} chứng chỉ):
+                          </strong>{' '}
+                          <span className="font-mono text-[11px] text-slate-600">
+                            {(syncStatus.fileNames || []).slice(0, 4).join(', ')}
+                            {(syncStatus.fileNames || []).length > 4 ? ` (+${syncStatus.fileNames.length - 4} file)` : ''}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-amber-900">
+                          <strong>Chế độ 2 chưa tải file Excel từ Google Drive:</strong> Vui lòng mở cài đặt Google Drive để quét thư mục "Số hóa chứng chỉ" (1-Click) hoặc dán link Apps Script.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openModalWithTab('drive_config')}
+                  className="shrink-0 inline-flex items-center gap-1.5 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-3 py-1 rounded-lg cursor-pointer self-start sm:self-auto"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Kiểm tra &amp; Tải Drive</span>
+                </button>
+              </div>
+            </div>
+          )}
           {isWriteQuotaExhausted && activeMode === 'firebase' && (
             <div className="bg-amber-50 border-t border-amber-200 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-amber-950">
               <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -474,6 +585,7 @@ export default function App() {
               onRetry={() => handleSearch(notFoundMssv)}
               sampleMssvs={sampleMssvs}
               onSelectSample={handleSearch}
+              diagnosticMessage={searchDiagnostic}
             />
           </div>
         )}

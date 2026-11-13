@@ -1,5 +1,10 @@
-import { CertificateRecord, SyncStatus, DataSourceType } from '../types/certificate';
+import { CertificateRecord, SyncStatus, DataSourceType, DriveFileDiagnostic } from '../types/certificate';
 import { INITIAL_DEMO_RECORDS } from './mockData';
+import {
+  saveRecordsToIndexedDb,
+  loadRecordsFromIndexedDb,
+  clearIndexedDbRecords,
+} from './indexedDbCache';
 
 const STORAGE_KEY_RECORDS = 'gdqp_certificate_records_v1';
 const STORAGE_KEY_STATUS = 'gdqp_sync_status_v1';
@@ -98,11 +103,12 @@ export function saveSyncStatus(status: SyncStatus): void {
 
 export function switchDataSourceMode(mode: 'firebase' | 'drive'): SyncStatus {
   const current = getSyncStatus();
+  const hasAppsScript = Boolean(getSavedAppsScriptUrl());
   const nextSource: DataSourceType =
     mode === 'drive'
-      ? 'apps_script'
-      : current.totalRecords > 0 && current.source !== 'demo_data'
-      ? 'local_excel'
+      ? hasAppsScript
+        ? 'apps_script'
+        : 'drive_oauth'
       : 'local_excel';
 
   const updated: SyncStatus = {
@@ -118,6 +124,7 @@ export function switchDataSourceMode(mode: 'firebase' | 'drive'): SyncStatus {
 export function initStorage(): CertificateRecord[] {
   recordsIndex.clear();
   let loadedRecords: CertificateRecord[] = [];
+  const currentStatus = getSyncStatus();
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY_RECORDS);
@@ -128,7 +135,7 @@ export function initStorage(): CertificateRecord[] {
     console.warn('Lỗi parse records từ LocalStorage:', e);
   }
 
-  if (!loadedRecords || loadedRecords.length === 0) {
+  if ((!loadedRecords || loadedRecords.length === 0) && currentStatus.source === 'demo_data') {
     loadedRecords = [...INITIAL_DEMO_RECORDS];
     saveRecords(loadedRecords, 'demo_data', ['So_hoa_GDQP_K47_Dot1.xlsx', 'So_hoa_GDQP_K48_Dot2.xlsx']);
   }
@@ -142,10 +149,31 @@ export function initStorage(): CertificateRecord[] {
   return loadedRecords;
 }
 
+/**
+ * Nạp toàn bộ bản ghi từ IndexedDB vào RAM (không bị giới hạn 1.500 dòng như localStorage)
+ */
+export async function hydrateFromIndexedDb(): Promise<number> {
+  const cached = await loadRecordsFromIndexedDb();
+  if (cached && cached.length > 0) {
+    for (const r of cached) {
+      if (r.mssv) {
+        recordsIndex.set(r.mssv.trim().toUpperCase(), r);
+      }
+    }
+  }
+  return recordsIndex.size;
+}
+
 export function saveRecords(
   records: CertificateRecord[],
   source: DataSourceType,
-  fileNames: string[]
+  fileNames: string[],
+  driveMeta?: {
+    driveFolderFound?: boolean;
+    driveFolderName?: string;
+    driveFolderId?: string;
+    driveFiles?: DriveFileDiagnostic[];
+  }
 ): void {
   recordsIndex.clear();
   for (const r of records) {
@@ -161,6 +189,9 @@ export function saveRecords(
     // Graceful fallback
   }
 
+  // Persist full dataset (up to 100k+ records) in IndexedDB
+  saveRecordsToIndexedDb(records).catch(console.warn);
+
   saveSyncStatus({
     source,
     totalRecords: records.length,
@@ -168,6 +199,7 @@ export function saveRecords(
     fileCount: fileNames.length,
     fileNames,
     appsScriptUrl: getSavedAppsScriptUrl(),
+    ...(driveMeta || {}),
   });
 }
 
@@ -191,17 +223,18 @@ export function appendRecords(
     }
   }
 
+  const allRecords = Array.from(recordsIndex.values());
   try {
-    if (recordsIndex.size <= 1500) {
-      const allRecords = Array.from(recordsIndex.values());
+    if (allRecords.length <= 1500) {
       localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(allRecords));
     } else {
-      const recentSubset = Array.from(recordsIndex.values()).slice(-1500);
-      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(recentSubset));
+      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(allRecords.slice(-1500)));
     }
   } catch {
     // Quota reached
   }
+
+  saveRecordsToIndexedDb(allRecords).catch(console.warn);
 
   const currentStatus = getSyncStatus();
   const existingFiles = Array.isArray(currentStatus.fileNames) ? currentStatus.fileNames : [];
@@ -226,6 +259,7 @@ export function clearAllLocalRecords(): void {
   } catch (e) {
     console.error('Lỗi xóa LocalStorage records:', e);
   }
+  clearIndexedDbRecords().catch(console.warn);
 
   saveSyncStatus({
     source: 'local_excel',

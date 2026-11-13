@@ -40,7 +40,10 @@ import {
   switchDataSourceMode,
   resetToDemo,
 } from '../services/storageService';
-import { queryAppsScript } from '../services/appsScriptConnector';
+import {
+  pingAppsScript,
+  syncAllFromAppsScript,
+} from '../services/appsScriptConnector';
 import { updateAdminPassword, revokeAdminSession } from '../services/adminAuthService';
 import {
   saveRecordsToCloud,
@@ -257,17 +260,59 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     // Case 1: Google Apps Script Web App URL
     if (raw.includes('script.google.com/macros/')) {
       setIsTestingAppsScript(true);
+      setIsScanningDrive(true);
+      setScanProgress({ message: 'Đang kiểm tra kết nối thư mục Google Drive qua Apps Script...', percent: 25 });
       try {
-        const test = await queryAppsScript(raw, 'TEST_PING');
-        if (!test.success && test.error && !test.error.includes('Không tìm thấy')) {
-          throw new Error(test.error);
+        const ping = await pingAppsScript(raw);
+        if (!ping.success) {
+          throw new Error(ping.error || 'Không thể kết nối tới Google Apps Script.');
         }
+
+        const pingFiles = ping.files || [];
+        const fileNames = pingFiles.map((f) => f.name);
         saveAppsScriptUrl(raw);
-        switchDataSourceMode('drive');
+
+        setScanProgress({
+          message: `Tìm thấy ${pingFiles.length} file trong "${ping.folderName || 'Số hóa chứng chỉ'}". Đang tải dữ liệu vào bộ nhớ tra cứu...`,
+          percent: 60,
+        });
+
+        const synced = await syncAllFromAppsScript(raw);
+        const loadedRecords = synced.records || [];
+        const finalFiles = synced.files || pingFiles;
+
+        if (loadedRecords.length > 0) {
+          saveRecords(loadedRecords, 'apps_script', finalFiles.map((f) => f.name), {
+            driveFolderFound: true,
+            driveFolderName: synced.folderName || ping.folderName || 'Số hóa chứng chỉ',
+            driveFolderId: synced.folderId || ping.folderId,
+            driveFiles: finalFiles,
+          });
+        } else {
+          saveRecords([], 'apps_script', fileNames, {
+            driveFolderFound: true,
+            driveFolderName: ping.folderName || 'Số hóa chứng chỉ',
+            driveFolderId: ping.folderId,
+            driveFiles: finalFiles,
+          });
+        }
+
         onDataUpdated();
-        setSuccessMsg(
-          'Đã kết nối & lưu thành công Chế độ 2 (Google Apps Script đọc thư mục "Số hóa chứng chỉ")! Sinh viên có thể tra cứu trực tiếp ngay.'
-        );
+
+        const errorFiles = finalFiles.filter((f) => f.status === 'error');
+        if (errorFiles.length > 0) {
+          setErrorMsg(
+            `Đã kết nối thư mục "${synced.folderName || ping.folderName || 'Số hóa chứng chỉ'}" nhưng có ${errorFiles.length} file lỗi đọc dữ liệu: ${errorFiles.map((f) => `${f.name} (${f.error})`).join('; ')}`
+          );
+        } else if (finalFiles.length === 0) {
+          setErrorMsg(
+            `Đã kết nối tới thư mục "${ping.folderName || 'Số hóa chứng chỉ'}" nhưng thư mục chưa có file Excel (.xlsx, .xls, .csv) hoặc Google Sheets nào.`
+          );
+        } else {
+          setSuccessMsg(
+            `Đã kết nối ${finalFiles.length} file (${loadedRecords.length.toLocaleString('vi-VN')} chứng chỉ) từ thư mục "${synced.folderName || ping.folderName || 'Số hóa chứng chỉ'}"! Dữ liệu Chế độ 2 đã sẵn sàng tra cứu.`
+          );
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Không thể kết nối tới Google Apps Script';
         setErrorMsg(
@@ -275,6 +320,8 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         );
       } finally {
         setIsTestingAppsScript(false);
+        setIsScanningDrive(false);
+        setScanProgress(null);
       }
       return;
     }
@@ -285,7 +332,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       saveDriveFolderUrl(raw);
       setSavedDriveFolderId(folderId);
       setSuccessMsg(
-        `Đã lưu ID thư mục Google Drive (${folderId}) và tự động điền sẵn vào đoạn Script bên dưới! Hãy nhấn "Copy Script", dán vào Apps Script -> Deploy -> rồi dán link Web App vào lại ô này để kích hoạt tra cứu công khai.`
+        `Đã lưu Folder ID (${folderId})! Bạn có thể bấm nút "Quét & Tải Excel bằng Google (1-Click)" ngay bên dưới để đọc trực tiếp các file Excel trong thư mục này, HOẶC Copy Script để dùng link Web App công khai.`
       );
       return;
     }
@@ -353,7 +400,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
     setIsScanningDrive(true);
-    setScanProgress({ message: 'Đang kết nối Google Drive API...', percent: 5 });
+    setScanProgress({ message: 'Đang xác thực quyền đọc Google Drive...', percent: 5 });
 
     try {
       const res = await googleSignIn();
@@ -361,14 +408,21 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         throw new Error('Chưa có quyền truy cập Google Drive. Vui lòng đăng nhập.');
       }
 
-      let folderIdToScan = savedDriveFolderId;
+      const inlineFolderId = extractDriveFolderId(driveLinkInput);
+      let folderIdToScan = inlineFolderId || savedDriveFolderId;
       let folderDisplayName = 'Số hóa chứng chỉ';
 
-      if (!folderIdToScan) {
+      if (inlineFolderId) {
+        saveDriveFolderUrl(driveLinkInput.trim());
+        setSavedDriveFolderId(inlineFolderId);
+        folderDisplayName = `Thư mục Drive (${inlineFolderId.slice(0, 10)}...)`;
+      } else if (!folderIdToScan) {
         setScanProgress({ message: 'Đang tìm thư mục "GDQP / Số hóa chứng chỉ"...', percent: 15 });
         const folder = await findGdqpFolder(res.accessToken);
         if (!folder) {
-          throw new Error('Không tìm thấy thư mục "GDQP" hoặc "Số hóa chứng chỉ" trong My Drive.');
+          throw new Error(
+            'Không tìm thấy thư mục "GDQP" hoặc "Số hóa chứng chỉ" trong Google Drive của bạn. Hãy dán trực tiếp Link chia sẻ thư mục Drive vào ô phía trên rồi bấm quét lại.'
+          );
         }
         folderIdToScan = folder.folderId;
         folderDisplayName = folder.folderPath;
@@ -381,27 +435,41 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
         (msg, pct) => setScanProgress({ message: msg, percent: pct })
       );
 
-      if (scanResult.records.length === 0) {
-        throw new Error(`Thư mục "${folderDisplayName}" hiện chưa có file Excel hợp lệ.`);
-      }
-
-      saveRecords(scanResult.records, 'drive_oauth', scanResult.filesScanned);
+      saveRecords(scanResult.records, 'drive_oauth', scanResult.filesScanned, {
+        driveFolderFound: true,
+        driveFolderName: folderDisplayName,
+        driveFolderId: folderIdToScan,
+        driveFiles: scanResult.fileDiagnostics,
+      });
       onDataUpdated();
 
-      setScanProgress({ message: 'Đang đồng bộ lên Cloud Firestore...', percent: 85 });
-      const cloudRes = await saveRecordsToCloud(
-        scanResult.records,
-        'drive_oauth',
-        scanResult.filesScanned,
-        (msg, pct) => setScanProgress({ message: msg, percent: pct })
-      );
+      if (scanResult.records.length === 0) {
+        throw new Error(
+          scanResult.fileDiagnostics.length === 0
+            ? `Thư mục "${folderDisplayName}" không có file Excel (.xlsx, .xls, .csv) hoặc Google Sheets nào.`
+            : `Đã thấy ${scanResult.fileDiagnostics.length} file trong "${folderDisplayName}" nhưng chưa đọc được dữ liệu MSSV/Họ tên. Vui lòng kiểm tra tên cột trong bảng chi tiết bên dưới.`
+        );
+      }
 
-      if (!cloudRes.success) {
-        throw new Error(cloudRes.error || 'Lỗi lưu dữ liệu Drive lên Cloud Firestore.');
+      // Đồng bộ tùy chọn lên Cloud Firestore nếu còn hạn mức ghi (không làm lỗi Chế độ 2 nếu Firestore hết hạn mức)
+      let cloudSyncNote = '';
+      if (!hasFirestoreWriteQuotaExceeded() && auth.currentUser) {
+        setScanProgress({ message: 'Đang lưu bản sao lên Cloud Firestore...', percent: 90 });
+        const cloudRes = await saveRecordsToCloud(
+          scanResult.records,
+          'drive_oauth',
+          scanResult.filesScanned,
+          (msg, pct) => setScanProgress({ message: msg, percent: pct })
+        );
+        if (!cloudRes.success) {
+          cloudSyncNote = ' (Chưa đồng bộ bản sao lên Firestore do hạn mức ghi, nhưng Chế độ 2 trên trình duyệt đã sẵn sàng tra cứu 100%).';
+        } else {
+          cloudSyncNote = ' Đã đồng bộ thêm bản sao lên Cloud Firestore.';
+        }
       }
 
       setSuccessMsg(
-        `Đã quét & đồng bộ ${scanResult.records.length.toLocaleString('vi-VN')} chứng chỉ từ Google Drive lên Cloud Firestore!`
+        `Đã kết nối & tải thành công ${scanResult.records.length.toLocaleString('vi-VN')} chứng chỉ từ ${scanResult.filesScanned.length} file trên Google Drive!${cloudSyncNote}`
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi quét thư mục Google Drive';
@@ -977,37 +1045,140 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
             {/* TAB 2: NO-CODE GOOGLE DRIVE ("Số hóa chứng chỉ") */}
             {activeTab === 'drive_config' && (
               <div className="space-y-4">
-                <div className="bg-blue-50/80 rounded-2xl p-4 border border-blue-200 text-xs text-[#002855] space-y-2">
-                  <div className="font-bold text-[#003B73] text-sm">
-                    Kết nối thư mục Google Drive ("Số hóa chứng chỉ") — Không cần cấu hình API phức tạp
+                {/* Live Mode 2 Connection Status & File List */}
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 space-y-3 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-[#002855] text-sm flex items-center gap-1.5">
+                        <HardDrive className="w-4 h-4 text-[#004B8D]" />
+                        <span>
+                          Trạng thái kết nối Chế độ 2: {syncStatus.driveFolderName || 'Thư mục "Số hóa chứng chỉ"'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        {(syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0
+                          ? `Đã nạp ${syncStatus.totalRecords.toLocaleString('vi-VN')} hồ sơ từ ${syncStatus.fileCount} file vào bộ nhớ tra cứu tức thì (cập nhật: ${syncStatus.lastUpdated}).`
+                          : 'Chưa tải dữ liệu từ file Excel trên Google Drive. Hãy chọn 1 trong 2 cách kết nối bên dưới.'}
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2.5 py-1 rounded-lg font-bold text-[11px] shrink-0 self-start sm:self-auto border ${
+                        (syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}
+                    >
+                      {(syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0
+                        ? `Đang kết nối (${syncStatus.fileCount} file)`
+                        : 'Chưa tải file Excel'}
+                    </span>
                   </div>
-                  <p className="leading-relaxed text-slate-700">
-                    Dán trực tiếp <strong>Link chia sẻ thư mục Google Drive</strong> hoặc{' '}
-                    <strong>Link Web App từ Google Apps Script</strong> vào ô dưới đây rồi bấm{' '}
-                    <strong>"Kết nối &amp; Lưu"</strong>. Khi thả thêm file Excel vào thư mục Drive, web sẽ tự động đọc toàn bộ file.
-                  </p>
+
+                  {/* Per-file table when Drive files were inspected/loaded */}
+                  {syncStatus.driveFiles && syncStatus.driveFiles.length > 0 && (
+                    <div className="bg-white rounded-xl border border-blue-200/80 overflow-hidden">
+                      <table className="w-full text-left text-[11px] border-collapse">
+                        <thead className="bg-[#002855] text-white">
+                          <tr>
+                            <th className="py-2 px-3 font-bold">Tên file Excel / Sheets trong Drive</th>
+                            <th className="py-2 px-3 font-bold text-right">Số dòng đọc được</th>
+                            <th className="py-2 px-3 font-bold text-right">Trạng thái</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {syncStatus.driveFiles.map((df, i) => (
+                            <tr key={`${df.name}_${i}`} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 font-mono font-semibold text-slate-800">
+                                {df.name}
+                                {df.error && (
+                                  <div className="text-[10px] font-sans text-rose-600 mt-0.5">{df.error}</div>
+                                )}
+                              </td>
+                              <td className="py-2 px-3 font-mono text-right font-bold text-[#004B8D]">
+                                {df.rowCount.toLocaleString('vi-VN')}
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                {df.status === 'connected' ? (
+                                  <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                                    Đã kết nối
+                                  </span>
+                                ) : df.status === 'empty' ? (
+                                  <span className="inline-block px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold">
+                                    Không có dòng
+                                  </span>
+                                ) : (
+                                  <span className="inline-block px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-bold">
+                                    Lỗi đọc file
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
-                <div className="space-y-2">
+                {/* Progress bar during Drive scan or Apps Script sync */}
+                {scanProgress && (
+                  <div className="space-y-1.5 p-3.5 rounded-xl bg-blue-50/70 border border-blue-200">
+                    <div className="flex justify-between text-xs text-[#003B73] font-semibold">
+                      <span>{scanProgress.message}</span>
+                      <span className="font-mono font-bold text-[#004B8D]">{scanProgress.percent}%</span>
+                    </div>
+                    <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-[#004B8D] h-2.5 rounded-full transition-all duration-300"
+                        style={{ width: `${scanProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Link Input + 2 Clear Actions */}
+                <div className="space-y-2.5">
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    Link thư mục Google Drive hoặc Link Google Apps Script Web App:
+                    Dán Link thư mục Google Drive hoặc Link Google Apps Script Web App:
                   </label>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="url"
                       value={driveLinkInput}
                       onChange={(e) => setDriveLinkInput(e.target.value)}
-                      placeholder="https://script.google.com/macros/s/.../exec  HOẶC  https://drive.google.com/drive/folders/..."
+                      placeholder="https://drive.google.com/drive/folders/...  HOẶC  https://script.google.com/macros/s/.../exec"
                       className="flex-1 text-xs font-mono p-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#00529C]"
                     />
                     <button
                       type="button"
                       onClick={handleSaveDriveConnection}
-                      disabled={isTestingAppsScript || !driveLinkInput.trim()}
+                      disabled={isTestingAppsScript || isScanningDrive || !driveLinkInput.trim()}
                       className="shrink-0 flex items-center justify-center gap-1.5 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-5 py-3 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
                     >
                       <RefreshCw className={`w-4 h-4 ${isTestingAppsScript ? 'animate-spin' : ''}`} />
-                      <span>{isTestingAppsScript ? 'Đang kiểm tra...' : 'Kết nối & Lưu'}</span>
+                      <span>{isTestingAppsScript ? 'Đang tải...' : 'Kiểm tra & Nạp dữ liệu'}</span>
+                    </button>
+                  </div>
+
+                  {/* Direct 1-Click OAuth Drive Reader (No Apps Script Needed) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-xs text-amber-300 flex items-center gap-1.5">
+                        <FolderSync className="w-4 h-4" />
+                        <span>Cách nhanh nhất cho Cán bộ (Không cần cài Apps Script):</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300">
+                        Dán link thư mục Drive ở ô trên (hoặc để trống tự tìm "Số hóa chứng chỉ"), rồi bấm nút bên phải để đọc trực tiếp toàn bộ file <code className="text-sky-300">.xlsx/.xls/Sheets</code> vào bộ nhớ tra cứu.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleScanDriveFolder}
+                      disabled={isScanningDrive}
+                      className="shrink-0 inline-flex items-center justify-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs px-4 py-2.5 rounded-xl cursor-pointer disabled:opacity-50 shadow-sm"
+                    >
+                      <FolderSync className={`w-4 h-4 ${isScanningDrive ? 'animate-spin' : ''}`} />
+                      <span>{isScanningDrive ? 'Đang đọc Drive...' : 'Quét & Tải Excel (1-Click)'}</span>
                     </button>
                   </div>
                 </div>
@@ -1017,55 +1188,39 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <h4 className="font-bold text-slate-900 text-xs">
-                        Đoạn mã Google Apps Script ngắn gọn (tự động đọc mọi file Excel trong "Số hóa chứng chỉ")
+                        Cách dùng cho Sinh viên tra cứu từ xa: Google Apps Script Web App
                       </h4>
                       <p className="text-[11px] text-slate-500">
                         {savedDriveFolderId
                           ? `Đã tự động điền Folder ID: ${savedDriveFolderId}`
-                          : 'Tự động tìm thư mục "Số hóa chứng chỉ" hoặc điền ID thư mục nếu có'}
+                          : 'Tự động tìm thư mục "Số hóa chứng chỉ" hoặc điền ID thư mục nếu bạn dán link Drive'}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={handleCopyShortScript}
-                      className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl shadow-2xs cursor-pointer shrink-0"
+                      className="inline-flex items-center gap-1.5 bg-[#002855] hover:bg-[#003B73] text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-2xs cursor-pointer shrink-0"
                     >
-                      {copiedScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{copiedScript ? 'Đã sao chép Script!' : 'Copy Script'}</span>
                     </button>
                   </div>
 
-                  <pre className="p-3.5 rounded-xl bg-slate-950 text-sky-300 font-mono text-[11px] overflow-x-auto max-h-52 leading-relaxed border border-slate-800">
+                  <pre className="p-3.5 rounded-xl bg-slate-950 text-sky-300 font-mono text-[11px] overflow-x-auto max-h-48 leading-relaxed border border-slate-800">
                     <code>{buildShortAppsScriptCode(savedDriveFolderId)}</code>
                   </pre>
 
                   <ol className="text-[11px] text-slate-600 list-decimal pl-4 space-y-1">
                     <li>
-                      Mở <strong>script.google.com</strong> &rarr; Tạo dự án mới &rarr; Dán đoạn code trên (nếu có file <code>.xlsx</code>, bấm dấu <strong>+</strong> ở mục <em>Services</em> bên trái &rarr; chọn <strong>Drive API</strong>).
+                      Mở <strong>script.google.com</strong> &rarr; Tạo dự án mới &rarr; Dán đoạn code trên (nếu trong thư mục có file <code>.xlsx/.xls</code>, bấm dấu <strong>+</strong> ở mục <em>Services</em> bên trái &rarr; thêm <strong>Drive API</strong>).
                     </li>
                     <li>
                       Bấm <strong>Deploy &rarr; New deployment &rarr; Web app</strong> (Execute as: <strong>Me</strong>, Who has access: <strong>Anyone</strong>).
                     </li>
                     <li>
-                      Copy đường link <code>.../exec</code> dán vào ô phía trên và bấm <strong>"Kết nối &amp; Lưu"</strong>.
+                      Copy đường link <code>.../exec</code> dán vào ô phía trên và bấm <strong>"Kiểm tra &amp; Nạp dữ liệu"</strong>.
                     </li>
                   </ol>
-                </div>
-
-                {/* Optional Direct OAuth Sync */}
-                <div className="pt-1 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span className="text-xs text-slate-500">
-                    Hoặc quét trực tiếp từ Google Drive để nạp bản sao vào Cloud Firestore:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleScanDriveFolder}
-                    disabled={isScanningDrive}
-                    className="inline-flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer disabled:opacity-50"
-                  >
-                    <FolderSync className={`w-3.5 h-3.5 ${isScanningDrive ? 'animate-spin' : ''}`} />
-                    <span>{isScanningDrive ? 'Đang quét Drive...' : 'Quét bằng tài khoản Google'}</span>
-                  </button>
                 </div>
               </div>
             )}

@@ -1,30 +1,24 @@
-import { CertificateRecord } from '../types/certificate';
+import { CertificateRecord, DriveFileDiagnostic } from '../types/certificate';
 
 export interface AppsScriptResponse {
   success: boolean;
   found: boolean;
-  data?: CertificateRecord;
+  data?: CertificateRecord | null;
+  matches?: CertificateRecord[];
+  records?: CertificateRecord[];
+  files?: DriveFileDiagnostic[];
+  folderName?: string;
+  folderId?: string;
+  totalFiles?: number;
+  totalRecords?: number;
   error?: string;
   sourceFile?: string;
   executionTimeMs?: number;
 }
 
-/**
- * Query a deployed Google Apps Script Web App endpoint by MSSV or Student Name
- */
-export async function queryAppsScript(
-  webAppUrl: string,
-  searchQuery: string
-): Promise<AppsScriptResponse> {
-  const cleanQuery = searchQuery.trim();
-  const separator = webAppUrl.includes('?') ? '&' : '?';
-  const queryUrl =
-    cleanQuery === 'TEST_PING'
-      ? `${webAppUrl}${separator}action=ping`
-      : `${webAppUrl}${separator}mssv=${encodeURIComponent(cleanQuery)}&q=${encodeURIComponent(cleanQuery)}`;
-
+async function fetchAppsScriptJson(url: string): Promise<AppsScriptResponse> {
   try {
-    const res = await fetch(queryUrl, {
+    const res = await fetch(url, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
@@ -35,8 +29,14 @@ export async function queryAppsScript(
       throw new Error(`Google Apps Script trả về lỗi HTTP ${res.status}: ${res.statusText}`);
     }
 
-    const json = await res.json();
-    return json;
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as AppsScriptResponse;
+    } catch {
+      throw new Error(
+        'Google Apps Script không trả về JSON hợp lệ. Hãy kiểm tra lại quyền Deploy Web App (Anyone / Bất kỳ ai) và URL kết thúc bằng /exec.'
+      );
+    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Lỗi kết nối tới Google Apps Script';
     return {
@@ -45,4 +45,40 @@ export async function queryAppsScript(
       error: msg,
     };
   }
+}
+
+/**
+ * Kiểm tra kết nối tới Google Apps Script & liệt kê các file Excel/Sheets trong thư mục Drive
+ */
+export async function pingAppsScript(webAppUrl: string): Promise<AppsScriptResponse> {
+  const cleanUrl = webAppUrl.trim();
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+  return fetchAppsScriptJson(`${cleanUrl}${separator}action=ping`);
+}
+
+/**
+ * Nạp toàn bộ dữ liệu chứng chỉ từ Google Drive thông qua Google Apps Script vào bộ nhớ tra cứu nhanh
+ */
+export async function syncAllFromAppsScript(webAppUrl: string): Promise<AppsScriptResponse> {
+  const cleanUrl = webAppUrl.trim();
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+  return fetchAppsScriptJson(`${cleanUrl}${separator}action=sync`);
+}
+
+/**
+ * Tra cứu trực tiếp theo MSSV hoặc Họ tên qua Google Apps Script Web App
+ */
+export async function queryAppsScript(
+  webAppUrl: string,
+  searchQuery: string
+): Promise<AppsScriptResponse> {
+  const cleanUrl = webAppUrl.trim();
+  const cleanQuery = searchQuery.trim();
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+  const queryUrl =
+    cleanQuery === 'TEST_PING'
+      ? `${cleanUrl}${separator}action=ping`
+      : `${cleanUrl}${separator}mssv=${encodeURIComponent(cleanQuery)}&q=${encodeURIComponent(cleanQuery)}`;
+
+  return fetchAppsScriptJson(queryUrl);
 }
