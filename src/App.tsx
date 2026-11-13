@@ -34,6 +34,10 @@ import {
   fetchCloudSyncStatus,
   fetchCertificatesForAdmin,
   recordSearchEvent,
+  hasFirestoreWriteQuotaExceeded,
+  onFirestoreQuotaStatusChange,
+  resetFirestoreWriteQuotaFlag,
+  FIRESTORE_PRICING_URL,
 } from './services/firestoreService';
 import {
   Lock,
@@ -46,6 +50,7 @@ import {
   Settings,
   Trash2,
   Users,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function App() {
@@ -65,6 +70,9 @@ export default function App() {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [adminActionTarget, setAdminActionTarget] = useState<'data_source' | 'history' | null>(null);
   const [firebaseRefreshTick, setFirebaseRefreshTick] = useState(0);
+  const [isWriteQuotaExhausted, setIsWriteQuotaExhausted] = useState(() =>
+    hasFirestoreWriteQuotaExceeded()
+  );
 
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
   const isOfficerAuthorized = isAdminAuthenticated || isLoggedInGoogle;
@@ -95,6 +103,11 @@ export default function App() {
     setIsAdminAuthenticated(isAdminSessionActive());
     refreshCloudMeta();
 
+    setIsWriteQuotaExhausted(hasFirestoreWriteQuotaExceeded());
+    const unsubscribeQuota = onFirestoreQuotaStatusChange((exhausted) => {
+      setIsWriteQuotaExhausted(exhausted);
+    });
+
     const unsubscribeAuth = initAuth(
       (user) => {
         setIsLoggedInGoogle(true);
@@ -111,6 +124,7 @@ export default function App() {
 
     return () => {
       unsubscribeAuth();
+      unsubscribeQuota();
     };
   }, [firebaseRefreshTick, refreshCloudMeta]);
 
@@ -363,6 +377,43 @@ export default function App() {
               </button>
             </div>
           </div>
+          {isWriteQuotaExhausted && activeMode === 'firebase' && (
+            <div className="bg-amber-50 border-t border-amber-200 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-amber-950">
+              <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Đã hết hạn mức ghi Firestore miễn phí hôm nay (Quota exceeded):</strong> Hạn mức sẽ đặt lại vào ngày mai (chi tiết gói Spark Enterprise xem tại{' '}
+                    <a
+                      href={FIRESTORE_PRICING_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline font-semibold text-[#004B8D]"
+                    >
+                      firebase.google.com/pricing
+                    </a>
+                    ). Tra cứu vẫn chạy bình thường; để ghi thêm dữ liệu ngay, hãy dán Firebase Config riêng hoặc chuyển sang Chế độ 2 (Google Drive).
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 pl-6 sm:pl-0">
+                  <button
+                    type="button"
+                    onClick={() => openModalWithTab('firebase_config')}
+                    className="bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer"
+                  >
+                    Đổi Firebase
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => resetFirestoreWriteQuotaFlag()}
+                    className="bg-white hover:bg-amber-100 text-amber-900 font-semibold px-2.5 py-1 rounded-lg border border-amber-300 cursor-pointer"
+                  >
+                    Thử lại
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -49,6 +49,10 @@ import {
   fetchCertificatesForAdmin,
   deleteRecordFromCloud,
   seedCloudIfEmpty,
+  hasFirestoreWriteQuotaExceeded,
+  onFirestoreQuotaStatusChange,
+  resetFirestoreWriteQuotaFlag,
+  FIRESTORE_PRICING_URL,
 } from '../services/firestoreService';
 import {
   firebaseConfig,
@@ -118,6 +122,9 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   const [isLoadingCloudList, setIsLoadingCloudList] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmActionState>(null);
   const [isProcessingDelete, setIsProcessingDelete] = useState(false);
+  const [isQuotaExhausted, setIsQuotaExhausted] = useState<boolean>(() =>
+    hasFirestoreWriteQuotaExceeded()
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isFirebaseAuthenticated = isLoggedInGoogle || Boolean(auth.currentUser);
@@ -150,8 +157,16 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
   };
 
   useEffect(() => {
+    const unsubQuota = onFirestoreQuotaStatusChange((exhausted) => {
+      setIsQuotaExhausted(exhausted);
+    });
+    return () => unsubQuota();
+  }, []);
+
+  useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
+      setIsQuotaExhausted(hasFirestoreWriteQuotaExceeded());
     }
   }, [isOpen, initialTab]);
 
@@ -201,6 +216,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
       if (!ok) {
         throw new Error('Cấu hình Firebase không hợp lệ.');
       }
+      resetFirestoreWriteQuotaFlag();
       await testFirestoreConnection();
       onFirebaseConfigChanged?.();
       switchDataSourceMode('firebase');
@@ -220,6 +236,7 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
     resetToDefaultFirebaseConfig();
+    setIsQuotaExhausted(hasFirestoreWriteQuotaExceeded());
     await testFirestoreConnection();
     onFirebaseConfigChanged?.();
     onDataUpdated();
@@ -740,6 +757,50 @@ export const DataSourceModal: React.FC<DataSourceModalProps> = ({
                 </button>
               </div>
             </form>
+          )}
+
+          {/* Firestore Daily Quota Notice */}
+          {isQuotaExhausted && (
+            <div className="mx-6 mt-4 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Cơ sở dữ liệu Firestore [{firebaseConfig.projectId}] đã đạt giới hạn ghi miễn phí trong ngày (Quota exceeded).</strong>{' '}
+                  Hạn mức sẽ tự động đặt lại vào ngày mai. Dữ liệu đã lưu vẫn <strong>tra cứu bình thường</strong>. Để tiếp tục nạp mới ngay hôm nay, bạn có thể dán <code className="bg-white px-1 rounded border border-amber-200">firebaseConfig</code> của dự án cá nhân ở Tab 1 hoặc dùng <strong>Chế độ 2: Google Drive</strong> ở Tab 2.
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pl-6">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('firebase_config')}
+                  className="bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer"
+                >
+                  Đổi Project Firebase
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('drive_config')}
+                  className="bg-white hover:bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded-lg border border-amber-300 cursor-pointer"
+                >
+                  Chuyển Google Drive
+                </button>
+                <button
+                  type="button"
+                  onClick={() => resetFirestoreWriteQuotaFlag()}
+                  className="text-[#004B8D] hover:underline font-semibold cursor-pointer"
+                >
+                  Đặt lại trạng thái kiểm tra
+                </button>
+                <a
+                  href={FIRESTORE_PRICING_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-slate-600 hover:underline font-medium ml-auto"
+                >
+                  Xem Spark plan →
+                </a>
+              </div>
+            </div>
           )}
 
           {/* Feedback messages */}

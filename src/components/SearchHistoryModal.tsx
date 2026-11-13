@@ -18,6 +18,10 @@ import {
   clearAllSearchHistory,
   isQuotaExceededError,
   QUOTA_EXCEEDED_VI_MESSAGE,
+  getLocalSearchHistory,
+  hasFirestoreWriteQuotaExceeded,
+  onFirestoreQuotaStatusChange,
+  FIRESTORE_PRICING_URL,
 } from '../services/firestoreService';
 import { auth, googleSignInAdmin } from '../services/firebaseAuth';
 import { ConfirmModal } from './ConfirmModal';
@@ -40,6 +44,9 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isFirebaseSignedIn, setIsFirebaseSignedIn] = useState<boolean>(Boolean(auth.currentUser));
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(() =>
+    hasFirestoreWriteQuotaExceeded()
+  );
 
   // Confirm modal state (replaces window.confirm)
   const [confirmState, setConfirmState] = useState<{
@@ -49,24 +56,41 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
   } | null>(null);
 
   useEffect(() => {
+    const unsubQuota = onFirestoreQuotaStatusChange((exhausted) => {
+      setIsQuotaExceeded(exhausted);
+    });
+    return () => unsubQuota();
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) return;
     setErrorMsg(null);
+    setIsQuotaExceeded(hasFirestoreWriteQuotaExceeded());
     const signedIn = Boolean(auth.currentUser);
     setIsFirebaseSignedIn(signedIn);
 
+    const localItems = getLocalSearchHistory();
+
     if (!signedIn) {
-      setHistoryItems([]);
+      setHistoryItems(localItems);
       return;
     }
 
     const unsubscribe = subscribeSearchHistory(
-      (items) => {
-        setHistoryItems(items);
+      (cloudItems) => {
+        const mergedMap = new Map<string, SearchHistoryItem>();
+        for (const item of localItems) mergedMap.set(item.id, item);
+        for (const item of cloudItems) mergedMap.set(item.id, item);
+        const merged = Array.from(mergedMap.values()).sort((a, b) =>
+          (b.timestamp || '').localeCompare(a.timestamp || '')
+        );
+        setHistoryItems(merged);
       },
       150,
       () => {
+        setHistoryItems(localItems);
         setErrorMsg(
-          'Tài khoản hiện tại chưa được cấp quyền xem lịch sử trên Firestore Rules. Vui lòng đăng nhập bằng tài khoản Google Cán bộ Quản trị.'
+          'Tài khoản hiện tại chưa được cấp quyền xem lịch sử Cloud trên Firestore Rules (đang hiển thị lịch sử tra cứu cục bộ trên máy này).'
         );
       }
     );
@@ -284,6 +308,25 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
               >
                 Đăng nhập Google Admin
               </button>
+            </div>
+          )}
+
+          {isQuotaExceeded && (
+            <div className="mx-6 mt-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div>
+                  <strong>Cảnh báo hạn mức ghi Firestore (Quota exceeded):</strong> Dự án Firestore mặc định đã hết lượt ghi miễn phí trong ngày và sẽ tự động đặt lại vào ngày mai. Lượt tra cứu mới vẫn được lưu cục bộ trên trình duyệt này.
+                </div>
+                <a
+                  href={FIRESTORE_PRICING_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block font-semibold text-[#004B8D] underline hover:text-[#002855]"
+                >
+                  Xem thông tin hạn mức Spark plan (Enterprise edition) →
+                </a>
+              </div>
             </div>
           )}
 

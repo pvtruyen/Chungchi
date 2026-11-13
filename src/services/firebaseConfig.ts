@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, Firestore, doc, getDocFromServer, terminate } from 'firebase/firestore';
 import appletFirebaseConfig from '../../firebase-applet-config.json';
 
 export interface FirebaseWebConfig {
@@ -108,6 +108,26 @@ export let auth: Auth = getAuth(app);
 export let db: Firestore = firebaseConfig.firestoreDatabaseId
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
+
+export function getCurrentDbQuotaKey(): string {
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  return `gdqp_quota_write_exhausted_${firebaseConfig.projectId}_${firebaseConfig.firestoreDatabaseId || 'default'}_${todayUtc}`;
+}
+
+/**
+ * Chấm dứt WriteStream đang bị kẹt vòng lặp backoff (khi gặp lỗi quota) nhưng vẫn giữ nguyên Auth
+ * và tạo lại instance Firestore sạch để tiếp tục đọc dữ liệu.
+ */
+export async function resetFirestoreWriteStream(): Promise<void> {
+  try {
+    await terminate(db);
+  } catch (err) {
+    console.warn('Không thể terminate Firestore instance cũ:', err);
+  }
+  db = firebaseConfig.firestoreDatabaseId
+    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
+}
 
 /**
  * Lưu cấu hình Firebase mới từ giao diện No-Code và khởi tạo lại kết nối ngay lập tức

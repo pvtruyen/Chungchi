@@ -14,7 +14,13 @@ import {
   orderBy,
   onSnapshot,
 } from 'firebase/firestore';
-import { db, auth } from './firebaseConfig';
+import {
+  db,
+  auth,
+  getCurrentDbQuotaKey,
+  resetFirestoreWriteStream,
+  isUsingCustomFirebaseConfig,
+} from './firebaseConfig';
 import { CertificateRecord, SyncStatus, DataSourceType, SearchHistoryItem } from '../types/certificate';
 import { INITIAL_DEMO_RECORDS } from './mockData';
 
@@ -22,11 +28,14 @@ const COLLECTION_CERTIFICATES = 'gdqp_certificates';
 const COLLECTION_META = 'gdqp_meta';
 const COLLECTION_HISTORY = 'gdqp_search_history';
 const DOC_STATUS = 'status';
+const LOCAL_HISTORY_STORAGE_KEY = 'gdqp_local_search_history_v1';
 
 export const FIRESTORE_QUOTA_CONSOLE_URL =
   'https://console.firebase.google.com/project/gen-lang-client-0366484892/firestore/databases/ai-studio-tracuchngchgdqpa-66e93f04-989f-486c-ac2f-e76374fe18b0/data?openUpgradeDialog=true';
 
-let writeQuotaExhaustedInSession = false;
+export const FIRESTORE_PRICING_URL = 'https://firebase.google.com/pricing#cloud-firestore';
+
+const quotaListeners = new Set<(exhausted: boolean) => void>();
 
 export function isQuotaExceededError(error: unknown): boolean {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
@@ -35,16 +44,114 @@ export function isQuotaExceededError(error: unknown): boolean {
     code === 'resource-exhausted' ||
     msg.includes('resource-exhausted') ||
     msg.includes('quota exceeded') ||
-    msg.includes('quota limit exceeded')
+    msg.includes('quota limit exceeded') ||
+    msg.includes('free daily write units') ||
+    msg.includes('__write_backoff_stalled__')
   );
 }
 
 export function hasFirestoreWriteQuotaExceeded(): boolean {
-  return writeQuotaExhaustedInSession;
+  try {
+    return localStorage.getItem(getCurrentDbQuotaKey()) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markFirestoreWriteQuotaExceeded(): void {
+  try {
+    localStorage.setItem(getCurrentDbQuotaKey(), '1');
+  } catch {
+    // ignore
+  }
+  quotaListeners.forEach((cb) => cb(true));
+}
+
+export function resetFirestoreWriteQuotaFlag(): void {
+  try {
+    localStorage.removeItem(getCurrentDbQuotaKey());
+  } catch {
+    // ignore
+  }
+  quotaListeners.forEach((cb) => cb(false));
+}
+
+export function onFirestoreQuotaStatusChange(cb: (exhausted: boolean) => void): () => void {
+  quotaListeners.add(cb);
+  return () => {
+    quotaListeners.delete(cb);
+  };
 }
 
 export const QUOTA_EXCEEDED_VI_MESSAGE =
-  'Đã vượt giới hạn lượt ghi miễn phí trong ngày (Free daily write units) của cơ sở dữ liệu Firestore. Hạn mức sẽ tự động đặt lại vào ngày mai. Dữ liệu tra cứu đã lưu trước đó vẫn hoạt động bình thường.';
+  'Đã vượt giới hạn lượt ghi miễn phí trong ngày (Free daily write units — Quota exceeded) của cơ sở dữ liệu Firestore mặc định. Hạn mức sẽ tự động đặt lại vào ngày mai. Bạn vẫn có thể tra cứu dữ liệu hiện có, chuyển sang Chế độ 2 (Google Drive), hoặc dán firebaseConfig của dự án cá nhân trong Cài đặt.';
+
+/**
+ * Chạy thao tác ghi Firestore với cơ chế phát hiện nhanh lỗi Quota / WriteStream backoff
+ * và ngắt WriteStream kịp thời để không bị treo hoặc lặp log lỗi liên tục.
+ */
+async function runWriteWithQuotaGuard<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number = 8000
+): Promise<T> {
+  if (hasFirestoreWriteQuotaExceeded()) {
+    throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error('__WRITE_BACKOFF_STALLED__'));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([operation(), timeoutPromise]);
+    return result;
+  } catch (err: unknown) {
+    const isStalled =
+      err instanceof Error && err.message.includes('__WRITE_BACKOFF_STALLED__');
+    if (isStalled || isQuotaExceededError(err)) {
+      markFirestoreWriteQuotaExceeded();
+      await resetFirestoreWriteStream();
+      throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+    }
+    throw err;
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+export function getLocalSearchHistory(): SearchHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SearchHistoryItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalSearchHistoryItem(item: SearchHistoryItem): void {
+  try {
+    const current = getLocalSearchHistory().filter((x) => x.id !== item.id);
+    const updated = [item, ...current].slice(0, 200);
+    localStorage.setItem(LOCAL_HISTORY_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // ignore storage quota
+  }
+}
+
+export function clearLocalSearchHistory(): void {
+  try {
+    localStorage.removeItem(LOCAL_HISTORY_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -248,22 +355,17 @@ async function commitBatchesWithConcurrency(
     batches.push({ batch, count: chunk.length });
   }
 
-  if (writeQuotaExhaustedInSession) {
+  if (hasFirestoreWriteQuotaExceeded()) {
     throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
   }
 
   let uploaded = 0;
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     const group = batches.slice(i, i + CONCURRENCY);
-    try {
-      await Promise.all(group.map((g) => g.batch.commit()));
-    } catch (err) {
-      if (isQuotaExceededError(err)) {
-        writeQuotaExhaustedInSession = true;
-        throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
-      }
-      throw err;
-    }
+    await runWriteWithQuotaGuard(
+      () => Promise.all(group.map((g) => g.batch.commit())),
+      15000
+    );
     uploaded += group.reduce((sum, g) => sum + g.count, 0);
 
     const pct = Math.min(95, Math.round((uploaded / total) * 90));
@@ -310,7 +412,10 @@ export async function saveRecordsToCloud(
       fileNames: fileNames.slice(0, 500),
     };
 
-    await setDoc(doc(db, COLLECTION_META, DOC_STATUS), statusData, { merge: true });
+    await runWriteWithQuotaGuard(
+      () => setDoc(doc(db, COLLECTION_META, DOC_STATUS), statusData, { merge: true }),
+      8000
+    );
 
     if (onProgress) {
       onProgress(`Đã lưu trữ vĩnh viễn ${uploaded.toLocaleString('vi-VN')} chứng chỉ lên đám mây!`, 100);
@@ -319,7 +424,7 @@ export async function saveRecordsToCloud(
     return { success: true, totalUploaded: uploaded };
   } catch (err: unknown) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       return { success: false, totalUploaded: 0, error: QUOTA_EXCEEDED_VI_MESSAGE };
     }
     try {
@@ -400,7 +505,10 @@ export async function appendRecordsToCloud(
       fileNames: updatedFiles,
     };
 
-    await setDoc(doc(db, COLLECTION_META, DOC_STATUS), statusData, { merge: true });
+    await runWriteWithQuotaGuard(
+      () => setDoc(doc(db, COLLECTION_META, DOC_STATUS), statusData, { merge: true }),
+      8000
+    );
 
     if (onProgress) {
       onProgress(
@@ -418,7 +526,7 @@ export async function appendRecordsToCloud(
     };
   } catch (err: unknown) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       return {
         success: false,
         totalUploaded: 0,
@@ -455,7 +563,10 @@ export async function deleteRecordFromCloud(mssv: string): Promise<{ success: bo
   }
 
   try {
-    await deleteDoc(doc(db, COLLECTION_CERTIFICATES, cleanMssv));
+    await runWriteWithQuotaGuard(
+      () => deleteDoc(doc(db, COLLECTION_CERTIFICATES, cleanMssv)),
+      8000
+    );
 
     const existingMeta = await fetchCloudSyncStatus();
     let totalInCloud = Math.max(0, (existingMeta?.totalRecords || 1) - 1);
@@ -472,12 +583,15 @@ export async function deleteRecordFromCloud(mssv: string): Promise<{ success: bo
       fileCount: existingMeta?.fileCount || 0,
       fileNames: existingMeta?.fileNames || [],
     };
-    await setDoc(doc(db, COLLECTION_META, DOC_STATUS), updatedStatus, { merge: true });
+    await runWriteWithQuotaGuard(
+      () => setDoc(doc(db, COLLECTION_META, DOC_STATUS), updatedStatus, { merge: true }),
+      8000
+    );
 
     return { success: true, totalInCloud };
   } catch (err: unknown) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       return { success: false, totalInCloud: 0, error: QUOTA_EXCEEDED_VI_MESSAGE };
     }
     const rawMsg = err instanceof Error ? err.message : String(err);
@@ -498,7 +612,7 @@ export async function deleteRecordFromCloud(mssv: string): Promise<{ success: bo
 export async function clearAllCertificatesFromCloud(
   onProgress?: (message: string, percent: number) => void
 ): Promise<{ success: boolean; error?: string }> {
-  if (writeQuotaExhaustedInSession) {
+  if (hasFirestoreWriteQuotaExceeded()) {
     return { success: false, error: QUOTA_EXCEEDED_VI_MESSAGE };
   }
   try {
@@ -529,7 +643,10 @@ export async function clearAllCertificatesFromCloud(
       let deleted = 0;
       for (let i = 0; i < batches.length; i += CONCURRENCY) {
         const group = batches.slice(i, i + CONCURRENCY);
-        await Promise.all(group.map((g) => g.batch.commit()));
+        await runWriteWithQuotaGuard(
+          () => Promise.all(group.map((g) => g.batch.commit())),
+          15000
+        );
         deleted += group.reduce((sum, g) => sum + g.count, 0);
 
         const pct = Math.min(95, Math.round((deleted / total) * 90));
@@ -547,13 +664,16 @@ export async function clearAllCertificatesFromCloud(
       fileCount: 0,
       fileNames: [],
     };
-    await setDoc(doc(db, COLLECTION_META, DOC_STATUS), emptyStatus);
+    await runWriteWithQuotaGuard(
+      () => setDoc(doc(db, COLLECTION_META, DOC_STATUS), emptyStatus),
+      8000
+    );
 
     if (onProgress) onProgress('Đã xóa sạch toàn bộ danh sách chứng chỉ trên Cloud Firebase!', 100);
     return { success: true };
   } catch (err: unknown) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       return { success: false, error: QUOTA_EXCEEDED_VI_MESSAGE };
     }
     const rawMsg = err instanceof Error ? err.message : String(err);
@@ -572,7 +692,7 @@ export async function clearAllCertificatesFromCloud(
  * Khởi tạo dữ liệu mẫu lên Cloud (chỉ gọi khi Cán bộ Admin yêu cầu hoặc collection rỗng)
  */
 export async function seedCloudIfEmpty(): Promise<boolean> {
-  if (!auth.currentUser || writeQuotaExhaustedInSession) return false;
+  if (!auth.currentUser || hasFirestoreWriteQuotaExceeded()) return false;
   try {
     const q = query(
       collection(db, COLLECTION_CERTIFICATES),
@@ -598,7 +718,7 @@ export async function seedCloudIfEmpty(): Promise<boolean> {
 }
 
 /**
- * Ghi nhận lượt tra cứu sinh viên vào lịch sử Firestore
+ * Ghi nhận lượt tra cứu sinh viên vào bộ nhớ trình duyệt + đồng bộ Firestore khi còn hạn mức ghi
  */
 export async function recordSearchEvent(
   record: CertificateRecord | null,
@@ -651,15 +771,26 @@ export async function recordSearchEvent(
         status: 'not_found',
       };
 
-  if (writeQuotaExhaustedInSession) {
+  // Luôn lưu cục bộ để đảm bảo tra cứu lịch sử tức thì mà không phụ thuộc hạn mức ghi Cloud
+  saveLocalSearchHistoryItem(historyItem);
+
+  // Chỉ ghi lên Cloud Firestore nếu còn hạn mức VÀ (cán bộ đã đăng nhập hoặc đang dùng Firebase Project riêng)
+  const shouldSyncHistoryToCloud =
+    !hasFirestoreWriteQuotaExceeded() &&
+    (Boolean(auth.currentUser) || isUsingCustomFirebaseConfig());
+
+  if (!shouldSyncHistoryToCloud) {
     return;
   }
+
   try {
-    await setDoc(doc(db, COLLECTION_HISTORY, id), historyItem);
+    await runWriteWithQuotaGuard(
+      () => setDoc(doc(db, COLLECTION_HISTORY, id), historyItem),
+      5000
+    );
   } catch (err) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
-      console.warn('Firestore daily write quota exceeded; skipping search history log for this session.');
+      console.warn('Đã đạt giới hạn ghi Firestore trong ngày; lịch sử tra cứu tiếp tục được lưu cục bộ.');
       return;
     }
     console.warn('Lỗi lưu lịch sử tra cứu lên Firestore:', err);
@@ -709,7 +840,7 @@ export function subscribeSearchHistory(
  * Chuyển đổi trạng thái "Đã phát chứng chỉ"
  */
 export async function toggleHistoryDaPhat(historyId: string, currentStatus: boolean): Promise<void> {
-  if (writeQuotaExhaustedInSession) {
+  if (hasFirestoreWriteQuotaExceeded()) {
     throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
   }
   try {
@@ -718,13 +849,17 @@ export async function toggleHistoryDaPhat(historyId: string, currentStatus: bool
       new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
       ' ' +
       new Date().toLocaleDateString('vi-VN');
-    await updateDoc(docRef, {
-      daPhat: !currentStatus,
-      ngayPhat: !currentStatus ? now : null,
-    });
+    await runWriteWithQuotaGuard(
+      () =>
+        updateDoc(docRef, {
+          daPhat: !currentStatus,
+          ngayPhat: !currentStatus ? now : null,
+        }),
+      6000
+    );
   } catch (err) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
     }
     handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_HISTORY}/${historyId}`);
@@ -735,14 +870,17 @@ export async function toggleHistoryDaPhat(historyId: string, currentStatus: bool
  * Xóa 1 dòng lịch sử tra cứu
  */
 export async function deleteHistoryItem(historyId: string): Promise<void> {
-  if (writeQuotaExhaustedInSession) {
+  if (hasFirestoreWriteQuotaExceeded()) {
     throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
   }
   try {
-    await deleteDoc(doc(db, COLLECTION_HISTORY, historyId));
+    await runWriteWithQuotaGuard(
+      () => deleteDoc(doc(db, COLLECTION_HISTORY, historyId)),
+      6000
+    );
   } catch (err) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
     }
     handleFirestoreError(err, OperationType.DELETE, `${COLLECTION_HISTORY}/${historyId}`);
@@ -753,7 +891,8 @@ export async function deleteHistoryItem(historyId: string): Promise<void> {
  * Xóa toàn bộ lịch sử tra cứu
  */
 export async function clearAllSearchHistory(): Promise<void> {
-  if (writeQuotaExhaustedInSession) {
+  clearLocalSearchHistory();
+  if (hasFirestoreWriteQuotaExceeded()) {
     throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
   }
   try {
@@ -766,10 +905,10 @@ export async function clearAllSearchHistory(): Promise<void> {
     );
     const batch = writeBatch(db);
     snap.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
+    await runWriteWithQuotaGuard(() => batch.commit(), 10000);
   } catch (err) {
     if (isQuotaExceededError(err)) {
-      writeQuotaExhaustedInSession = true;
+      markFirestoreWriteQuotaExceeded();
       throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
     }
     handleFirestoreError(err, OperationType.DELETE, COLLECTION_HISTORY);
