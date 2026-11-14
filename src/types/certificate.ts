@@ -27,23 +27,7 @@ export interface SearchState {
   error: string | null;
 }
 
-export interface DriveFileInfo {
-  id: string;
-  name: string;
-  mimeType: string;
-  size?: string;
-  modifiedTime?: string;
-}
-
-export interface DriveFileDiagnostic {
-  name: string;
-  mimeType?: string;
-  rowCount: number;
-  status: 'connected' | 'empty' | 'error';
-  error?: string;
-}
-
-export type DataSourceType = 'drive_oauth' | 'apps_script' | 'local_excel' | 'demo_data';
+export type DataSourceType = 'local_excel' | 'demo_data';
 
 export interface SyncStatus {
   source: DataSourceType;
@@ -51,11 +35,6 @@ export interface SyncStatus {
   lastUpdated: string;
   fileCount: number;
   fileNames: string[];
-  appsScriptUrl?: string;
-  driveFolderFound?: boolean;
-  driveFolderName?: string;
-  driveFolderId?: string;
-  driveFiles?: DriveFileDiagnostic[];
 }
 
 export interface SearchHistoryItem {

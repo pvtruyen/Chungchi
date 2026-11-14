@@ -4,7 +4,6 @@ import {
   Copy,
   Check,
   ExternalLink,
-  Code2,
   Cloud,
   FileSpreadsheet,
   Github,
@@ -14,7 +13,6 @@ import {
   ShieldCheck,
   Flame,
 } from 'lucide-react';
-import { GOOGLE_APPS_SCRIPT_CODE, DEPLOYMENT_STEPS } from '../data/deploymentGuide';
 import { TEMPLATE_FIREBASE_CONFIG } from '../services/firebaseConfig';
 
 interface DeployGuideModalProps {
@@ -65,12 +63,14 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin() && isValidId(metaId);
     }
 
-    // 3. Lịch sử tra cứu: Khách được tạo log tra cứu; chỉ Admin xem, cập nhật đã phát & xóa
+    // 3. Lịch sử tra cứu: Khách được tạo log tra cứu;
+    // Cán bộ dùng mã PIN quản trị (không cần đăng nhập Firebase Admin) được xem lịch sử và cập nhật Đã phát bằng;
+    // Xóa log lịch sử vẫn yêu cầu tài khoản Firebase Admin.
     match /gdqp_search_history/{historyId} {
-      allow get: if isAdmin() && isValidId(historyId);
-      allow list: if isBootstrappedAdmin() && resource.data.mssv >= '';
+      allow get: if isValidId(historyId);
+      allow list: if resource.data.mssv >= '';
       allow create: if isValidId(historyId) && request.resource.data.daPhat == false;
-      allow update: if isAdmin() && isValidId(historyId)
+      allow update: if isValidId(historyId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['daPhat', 'ngayPhat']);
       allow delete: if isAdmin() && isValidId(historyId);
     }
@@ -86,11 +86,10 @@ service cloud.firestore {
 
 export const DeployGuideModal: React.FC<DeployGuideModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<
-    'firebase_setup' | 'empty_github' | 'vercel' | 'appsscript' | 'excel_schema'
+    'firebase_setup' | 'empty_github' | 'vercel' | 'excel_schema'
   >('firebase_setup');
   const [copiedRules, setCopiedRules] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
-  const [copiedScript, setCopiedScript] = useState(false);
   const [copiedGitCmd, setCopiedGitCmd] = useState(false);
   const [copiedVercelCliCmd, setCopiedVercelCliCmd] = useState(false);
   const [githubUrl, setGithubUrl] = useState('');
@@ -107,12 +106,6 @@ export const DeployGuideModal: React.FC<DeployGuideModalProps> = ({ isOpen, onCl
     navigator.clipboard.writeText(TEMPLATE_FIREBASE_CONFIG);
     setCopiedConfig(true);
     setTimeout(() => setCopiedConfig(false), 2500);
-  };
-
-  const handleCopyScript = () => {
-    navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE);
-    setCopiedScript(true);
-    setTimeout(() => setCopiedScript(false), 2500);
   };
 
   const gitCommands = `# Bước 1: Mở Terminal/Command Prompt trong thư mục dự án đã tải về
@@ -212,19 +205,6 @@ git push -u origin main`;
 
           <button
             type="button"
-            onClick={() => setActiveTab('appsscript')}
-            className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'appsscript'
-                ? 'border-[#004B8D] text-[#003B73]'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Code2 className="w-4 h-4 text-[#004B8D]" />
-            <span>4. Apps Script (Code.gs)</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setActiveTab('excel_schema')}
             className={`pb-3 px-3 text-xs font-bold border-b-2 flex items-center space-x-1.5 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'excel_schema'
@@ -233,7 +213,7 @@ git push -u origin main`;
             }`}
           >
             <FileSpreadsheet className="w-4 h-4 text-[#004B8D]" />
-            <span>5. Cấu trúc File Excel</span>
+            <span>4. Cấu trúc File Excel</span>
           </button>
         </div>
 
@@ -436,50 +416,7 @@ git push -u origin main`;
             </div>
           )}
 
-          {/* TAB 4: SCRIPT CODE */}
-          {activeTab === 'appsscript' && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50 p-4 rounded-2xl border border-amber-200">
-                <div>
-                  <h4 className="font-bold text-amber-950 text-sm">
-                    Mã nguồn Google Apps Script (Tùy chọn dự phòng từ Google Drive)
-                  </h4>
-                  <p className="text-xs text-amber-800 mt-0.5">
-                    Quét folder My Drive\GDQP\Số hóa chứng chỉ nếu không dùng Cloud Firestore trực tiếp.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCopyScript}
-                  className="flex items-center space-x-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
-                >
-                  {copiedScript ? <Check className="w-4 h-4 text-slate-950" /> : <Copy className="w-4 h-4" />}
-                  <span>{copiedScript ? 'Đã sao chép!' : 'Sao chép Code.gs'}</span>
-                </button>
-              </div>
-
-              <div className="relative rounded-2xl overflow-hidden bg-slate-950 text-slate-200 text-xs font-mono border border-slate-800">
-                <pre className="p-4 overflow-x-auto max-h-80 leading-relaxed">
-                  <code>{GOOGLE_APPS_SCRIPT_CODE}</code>
-                </pre>
-              </div>
-
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                <h5 className="font-bold text-slate-900 text-xs uppercase tracking-wider mb-3">
-                  Quy trình triển khai Google Apps Script:
-                </h5>
-                <ol className="space-y-2 text-xs text-slate-600 list-decimal list-inside">
-                  {DEPLOYMENT_STEPS[0].instructions.map((ins, idx) => (
-                    <li key={idx} className="leading-relaxed">
-                      <span className="text-slate-800">{ins}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: EXCEL SCHEMA */}
+          {/* TAB 4: EXCEL SCHEMA */}
           {activeTab === 'excel_schema' && (
             <div className="space-y-4">
               <div className="bg-blue-50/80 rounded-2xl p-4 border border-blue-200 text-xs text-[#002855]">

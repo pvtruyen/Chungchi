@@ -70,7 +70,7 @@ service cloud.firestore {
 
     function isValidSyncMeta(data) {
       return data.keys().hasAll(['source', 'totalRecords', 'lastUpdated', 'fileCount', 'fileNames'])
-        && data.keys().hasOnly(['source', 'totalRecords', 'lastUpdated', 'fileCount', 'fileNames', 'appsScriptUrl', 'driveFolderFound'])
+        && data.keys().hasOnly(['source', 'totalRecords', 'lastUpdated', 'fileCount', 'fileNames'])
         && data.source is string && data.source.size() <= 50
         && (data.totalRecords is int || data.totalRecords is float) && data.totalRecords >= 0
         && data.lastUpdated is string && data.lastUpdated.size() <= 64
@@ -130,14 +130,14 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(metaId);
     }
 
-    // 3. Lịch sử tra cứu: Khách được tạo log tra cứu hợp lệ (daPhat = false),
-    // chỉ Cán bộ Admin mới được xem lịch sử, đánh dấu đã phát, hoặc xóa.
+    // 3. Lịch sử tra cứu: Khách được tạo log tra cứu hợp lệ (daPhat = false);
+    // Cán bộ dùng mã PIN quản trị (không cần đăng nhập Firebase Admin) được xem lịch sử và cập nhật trạng thái phát bằng (daPhat, ngayPhat);
+    // Xóa log lịch sử vẫn yêu cầu tài khoản Firebase Admin.
     match /gdqp_search_history/{historyId} {
-      allow get: if isAdmin() && isValidId(historyId);
-      allow list: if isBootstrappedAdmin() && resource.data.mssv >= '';
+      allow get: if isValidId(historyId);
+      allow list: if resource.data.mssv >= '';
       allow create: if isValidId(historyId) && isValidSearchHistory(incoming()) && incoming().daPhat == false;
-      allow update: if isAdmin()
-        && isValidId(historyId)
+      allow update: if isValidId(historyId)
         && isValidSearchHistory(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['daPhat', 'ngayPhat']);
       allow delete: if isAdmin() && isValidId(historyId);

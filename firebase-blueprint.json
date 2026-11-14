@@ -35,9 +35,7 @@
         "totalRecords": { "type": "number" },
         "lastUpdated": { "type": "string", "maxLength": 64 },
         "fileCount": { "type": "number" },
-        "fileNames": { "type": "array" },
-        "appsScriptUrl": { "type": "string", "maxLength": 500, "description": "Link Web App Google Apps Script công khai cho Chế độ 2" },
-        "driveFolderFound": { "type": "boolean" }
+        "fileNames": { "type": "array" }
       },
       "required": ["source", "totalRecords", "lastUpdated", "fileCount", "fileNames"]
     },

@@ -23,7 +23,6 @@ import {
   onFirestoreQuotaStatusChange,
   FIRESTORE_PRICING_URL,
 } from '../services/firestoreService';
-import { auth, googleSignInAdmin } from '../services/firebaseAuth';
 import { ConfirmModal } from './ConfirmModal';
 import * as XLSX from 'xlsx';
 
@@ -43,7 +42,6 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
   const [isClearing, setIsClearing] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isFirebaseSignedIn, setIsFirebaseSignedIn] = useState<boolean>(Boolean(auth.currentUser));
   const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(() =>
     hasFirestoreWriteQuotaExceeded()
   );
@@ -66,20 +64,15 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
     if (!isOpen) return;
     setErrorMsg(null);
     setIsQuotaExceeded(hasFirestoreWriteQuotaExceeded());
-    const signedIn = Boolean(auth.currentUser);
-    setIsFirebaseSignedIn(signedIn);
 
     const localItems = getLocalSearchHistory();
-
-    if (!signedIn) {
-      setHistoryItems(localItems);
-      return;
-    }
+    setHistoryItems(localItems);
 
     const unsubscribe = subscribeSearchHistory(
       (cloudItems) => {
+        const currentLocal = getLocalSearchHistory();
         const mergedMap = new Map<string, SearchHistoryItem>();
-        for (const item of localItems) mergedMap.set(item.id, item);
+        for (const item of currentLocal) mergedMap.set(item.id, item);
         for (const item of cloudItems) mergedMap.set(item.id, item);
         const merged = Array.from(mergedMap.values()).sort((a, b) =>
           (b.timestamp || '').localeCompare(a.timestamp || '')
@@ -88,9 +81,9 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
       },
       150,
       () => {
-        setHistoryItems(localItems);
+        setHistoryItems(getLocalSearchHistory());
         setErrorMsg(
-          'Tài khoản hiện tại chưa được cấp quyền xem lịch sử Cloud trên Firestore Rules (đang hiển thị lịch sử tra cứu cục bộ trên máy này).'
+          'Không thể tải lịch sử từ Cloud Firestore (đang hiển thị lịch sử tra cứu cục bộ trên máy này). Vui lòng kiểm tra Firestore Rules đã được Deploy mới nhất.'
         );
       }
     );
@@ -98,24 +91,26 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [isOpen, isFirebaseSignedIn]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
-
-  const handleQuickGoogleLogin = async () => {
-    setErrorMsg(null);
-    try {
-      await googleSignInAdmin();
-      setIsFirebaseSignedIn(true);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Lỗi đăng nhập Google';
-      setErrorMsg(`Đăng nhập thất bại: ${msg}`);
-    }
-  };
 
   const handleToggleDaPhat = async (item: SearchHistoryItem) => {
     setIsUpdatingId(item.id);
     setErrorMsg(null);
+    const nextStatus = !item.daPhat;
+    const now =
+      new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
+      ' ' +
+      new Date().toLocaleDateString('vi-VN');
+
+    // Optimistic UI update
+    setHistoryItems((prev) =>
+      prev.map((x) =>
+        x.id === item.id ? { ...x, daPhat: nextStatus, ngayPhat: nextStatus ? now : undefined } : x
+      )
+    );
+
     try {
       await toggleHistoryDaPhat(item.id, item.daPhat);
       setFeedbackMsg(
@@ -125,10 +120,17 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
       );
       setTimeout(() => setFeedbackMsg(null), 3000);
     } catch (err: unknown) {
+      // Revert optimistic update on failure
+      setHistoryItems((prev) =>
+        prev.map((x) =>
+          x.id === item.id ? { ...x, daPhat: item.daPhat, ngayPhat: item.ngayPhat } : x
+        )
+      );
       if (isQuotaExceededError(err)) {
         setErrorMsg(QUOTA_EXCEEDED_VI_MESSAGE);
       } else {
-        setErrorMsg('Không thể cập nhật trạng thái. Vui lòng đảm bảo bạn đã đăng nhập tài khoản Firebase Cán bộ.');
+        const msg = err instanceof Error ? err.message : 'Lỗi không xác định';
+        setErrorMsg(`Không thể cập nhật trạng thái phát bằng lên Cloud: ${msg}`);
       }
     } finally {
       setIsUpdatingId(null);
@@ -142,9 +144,11 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
     try {
       if (confirmState.type === 'single' && confirmState.id) {
         await deleteHistoryItem(confirmState.id);
+        setHistoryItems((prev) => prev.filter((x) => x.id !== confirmState.id));
         setFeedbackMsg(`Đã xóa mục lịch sử của MSSV ${confirmState.mssv}.`);
       } else if (confirmState.type === 'all') {
         await clearAllSearchHistory();
+        setHistoryItems([]);
         setFeedbackMsg('Đã làm trống toàn bộ lịch sử tra cứu.');
       }
       setTimeout(() => setFeedbackMsg(null), 3000);
@@ -152,7 +156,10 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
       if (isQuotaExceededError(err)) {
         setErrorMsg(QUOTA_EXCEEDED_VI_MESSAGE);
       } else {
-        setErrorMsg('Không đủ quyền xóa lịch sử. Vui lòng đăng nhập tài khoản Firebase Cán bộ.');
+        setHistoryItems(getLocalSearchHistory());
+        setErrorMsg(
+          'Xóa nhật ký trên Cloud Firestore cần tài khoản Firebase Admin (lịch sử cục bộ trên máy này đã được cập nhật).'
+        );
       }
     } finally {
       setIsClearing(false);
@@ -228,7 +235,7 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
                   </span>
                   <span className="flex items-center space-x-1 text-[11px] text-sky-300 font-semibold">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Trực tiếp thời gian thực</span>
+                    <span>Trực tiếp thời gian thực (PIN Quản trị)</span>
                   </span>
                 </div>
                 <h3 className="text-base sm:text-lg font-bold text-white">
@@ -292,24 +299,6 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
               </button>
             </div>
           </div>
-
-          {!isFirebaseSignedIn && (
-            <div className="mx-6 mt-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-start space-x-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Cần đăng nhập tài khoản <strong>Google Cán bộ Quản trị</strong> để tải và cập nhật lịch sử phát bằng từ Cloud Firestore.
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleQuickGoogleLogin}
-                className="shrink-0 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-3.5 py-2 rounded-xl text-xs cursor-pointer transition-colors"
-              >
-                Đăng nhập Google Admin
-              </button>
-            </div>
-          )}
 
           {isQuotaExceeded && (
             <div className="mx-6 mt-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex items-start space-x-2">
@@ -547,7 +536,7 @@ export const SearchHistoryModal: React.FC<SearchHistoryModalProps> = ({
           <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
             <div>
               * Cán bộ phát bằng nhấn <strong className="text-slate-700">"Chờ Phát Bằng"</strong> để chuyển sang{' '}
-              <strong className="text-[#004B8D]">"Đã Phát Bằng"</strong>.
+              <strong className="text-[#004B8D]">"Đã Phát Bằng"</strong> (không cần tài khoản Firebase Admin).
             </div>
             <button
               onClick={onClose}

@@ -30,7 +30,7 @@ export const NotFoundState: React.FC<NotFoundStateProps> = ({
 
       {diagnosticMessage ? (
         <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs sm:text-sm text-left leading-relaxed">
-          <strong className="block text-amber-900 mb-1">Chẩn đoán nguồn dữ liệu (Chế độ 2 - Google Drive):</strong>
+          <strong className="block text-amber-900 mb-1">Chẩn đoán nguồn dữ liệu:</strong>
           <span>{diagnosticMessage}</span>
         </div>
       ) : (

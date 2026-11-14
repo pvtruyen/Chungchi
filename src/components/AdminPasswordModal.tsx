@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, KeyRound, Eye, EyeOff, AlertCircle, X, Mail, ShieldCheck, LogIn } from 'lucide-react';
 import { verifyAdminPassword, grantAdminSession, DEFAULT_ADMIN_PASSWORD } from '../services/adminAuthService';
 import { googleSignInAdmin, emailSignInAdmin } from '../services/firebaseAuth';
@@ -7,20 +7,29 @@ interface AdminPasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  defaultMode?: 'firebase' | 'pin';
 }
 
 export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  defaultMode = 'firebase',
 }) => {
-  const [authMode, setAuthMode] = useState<'firebase' | 'pin'>('firebase');
+  const [authMode, setAuthMode] = useState<'firebase' | 'pin'>(defaultMode);
   const [email, setEmail] = useState('');
   const [emailPwd, setEmailPwd] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setAuthMode(defaultMode);
+      setErrorMsg(null);
+    }
+  }, [isOpen, defaultMode]);
 
   if (!isOpen) return null;
 
@@ -224,8 +233,8 @@ export const AdminPasswordModal: React.FC<AdminPasswordModalProps> = ({
             </div>
           ) : (
             <form onSubmit={handlePinSubmit} className="space-y-4">
-              <div className="text-xs text-slate-600 leading-relaxed">
-                Nhập mã PIN quản trị để mở khóa giao diện cấu hình (Lưu ý: các thao tác ghi/xóa trên máy chủ Firebase vẫn yêu cầu đăng nhập tài khoản Firebase hợp lệ).
+              <div className="text-xs text-slate-600 leading-relaxed bg-blue-50/70 p-3 rounded-xl border border-blue-200">
+                Nhập <strong>mã PIN quản trị</strong> để xem <strong>Lịch sử phát bằng</strong> và cập nhật trạng thái <strong>Đã phát bằng</strong> ngay lập tức mà <strong>không cần đăng nhập tài khoản Firebase</strong>. (Các thao tác nạp Excel hoặc xóa chứng chỉ trên Cloud vẫn cần tài khoản Firebase Admin).
               </div>
 
               <div>

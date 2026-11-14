@@ -19,7 +19,6 @@ import {
   auth,
   getCurrentDbQuotaKey,
   resetFirestoreWriteStream,
-  isUsingCustomFirebaseConfig,
 } from './firebaseConfig';
 import { CertificateRecord, SyncStatus, DataSourceType, SearchHistoryItem } from '../types/certificate';
 import { INITIAL_DEMO_RECORDS } from './mockData';
@@ -84,7 +83,7 @@ export function onFirestoreQuotaStatusChange(cb: (exhausted: boolean) => void): 
 }
 
 export const QUOTA_EXCEEDED_VI_MESSAGE =
-  'Đã vượt giới hạn lượt ghi miễn phí trong ngày (Free daily write units — Quota exceeded) của cơ sở dữ liệu Firestore mặc định. Hạn mức sẽ tự động đặt lại vào ngày mai. Bạn vẫn có thể tra cứu dữ liệu hiện có, chuyển sang Chế độ 2 (Google Drive), hoặc dán firebaseConfig của dự án cá nhân trong Cài đặt.';
+  'Đã vượt giới hạn lượt ghi miễn phí trong ngày (Free daily write units — Quota exceeded) của cơ sở dữ liệu Firestore mặc định. Hạn mức sẽ tự động đặt lại vào ngày mai. Bạn vẫn có thể tra cứu dữ liệu hiện có hoặc dán firebaseConfig của dự án cá nhân trong Cài đặt.';
 
 /**
  * Chạy thao tác ghi Firestore với cơ chế phát hiện nhanh lỗi Quota / WriteStream backoff
@@ -148,6 +147,43 @@ function saveLocalSearchHistoryItem(item: SearchHistoryItem): void {
 export function clearLocalSearchHistory(): void {
   try {
     localStorage.removeItem(LOCAL_HISTORY_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function updateLocalSearchHistoryDaPhat(
+  historyId: string,
+  daPhat: boolean,
+  ngayPhat?: string | null
+): void {
+  try {
+    const current = getLocalSearchHistory();
+    let changed = false;
+    const updated = current.map((item) => {
+      if (item.id === historyId) {
+        changed = true;
+        return {
+          ...item,
+          daPhat,
+          ngayPhat: ngayPhat || undefined,
+        };
+      }
+      return item;
+    });
+    if (changed) {
+      localStorage.setItem(LOCAL_HISTORY_STORAGE_KEY, JSON.stringify(updated));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function removeLocalSearchHistoryItem(historyId: string): void {
+  try {
+    const current = getLocalSearchHistory();
+    const updated = current.filter((item) => item.id !== historyId);
+    localStorage.setItem(LOCAL_HISTORY_STORAGE_KEY, JSON.stringify(updated));
   } catch {
     // ignore
   }
@@ -262,7 +298,14 @@ export async function fetchCloudSyncStatus(): Promise<SyncStatus | null> {
     const docRef = doc(db, COLLECTION_META, DOC_STATUS);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      return snap.data() as SyncStatus;
+      const raw = snap.data() as Partial<SyncStatus> & { source?: string };
+      return {
+        source: raw.source === 'demo_data' ? 'demo_data' : 'local_excel',
+        totalRecords: Number(raw.totalRecords || 0),
+        lastUpdated: String(raw.lastUpdated || new Date().toLocaleDateString('vi-VN')),
+        fileCount: Number(raw.fileCount || 0),
+        fileNames: Array.isArray(raw.fileNames) ? raw.fileNames : [],
+      };
     }
     return null;
   } catch (error) {
@@ -272,8 +315,8 @@ export async function fetchCloudSyncStatus(): Promise<SyncStatus | null> {
 }
 
 /**
- * Lưu cấu hình chế độ & Link Apps Script lên Firestore (gdqp_meta/status)
- * để mọi máy tính / trình duyệt khác tự động nhận cấu hình khi truy cập.
+ * Lưu trạng thái dữ liệu lên Firestore (gdqp_meta/status)
+ * để các thiết bị khác tự động nhận thống kê mới nhất khi truy cập.
  */
 export async function saveCloudSyncStatus(
   status: SyncStatus
@@ -287,19 +330,14 @@ export async function saveCloudSyncStatus(
   }
 
   const payload: Record<string, unknown> = {
-    source: String(status.source || 'local_excel').slice(0, 50),
+    source: status.source === 'demo_data' ? 'demo_data' : 'local_excel',
     totalRecords: Number(status.totalRecords || 0),
     lastUpdated: String(status.lastUpdated || new Date().toLocaleString('vi-VN')).slice(0, 64),
     fileCount: Number(status.fileCount || 0),
     fileNames: Array.isArray(status.fileNames)
       ? status.fileNames.slice(0, 500).map((fn) => String(fn).slice(0, 255))
       : [],
-    driveFolderFound: Boolean(status.driveFolderFound),
   };
-
-  if (status.appsScriptUrl && status.appsScriptUrl.trim()) {
-    payload.appsScriptUrl = status.appsScriptUrl.trim().slice(0, 500);
-  }
 
   try {
     await runWriteWithQuotaGuard(
@@ -827,10 +865,8 @@ export async function recordSearchEvent(
   // Luôn lưu cục bộ để đảm bảo tra cứu lịch sử tức thì mà không phụ thuộc hạn mức ghi Cloud
   saveLocalSearchHistoryItem(historyItem);
 
-  // Chỉ ghi lên Cloud Firestore nếu còn hạn mức VÀ (cán bộ đã đăng nhập hoặc đang dùng Firebase Project riêng)
-  const shouldSyncHistoryToCloud =
-    !hasFirestoreWriteQuotaExceeded() &&
-    (Boolean(auth.currentUser) || isUsingCustomFirebaseConfig());
+  // Đồng bộ lên Cloud Firestore nếu còn hạn mức ghi để Cán bộ phát bằng xem được mọi lúc bằng mã PIN
+  const shouldSyncHistoryToCloud = !hasFirestoreWriteQuotaExceeded();
 
   if (!shouldSyncHistoryToCloud) {
     return;
@@ -893,20 +929,25 @@ export function subscribeSearchHistory(
  * Chuyển đổi trạng thái "Đã phát chứng chỉ"
  */
 export async function toggleHistoryDaPhat(historyId: string, currentStatus: boolean): Promise<void> {
+  const nextStatus = !currentStatus;
+  const now =
+    new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
+    ' ' +
+    new Date().toLocaleDateString('vi-VN');
+  const nextNgayPhat = nextStatus ? now : null;
+
+  updateLocalSearchHistoryDaPhat(historyId, nextStatus, nextNgayPhat);
+
   if (hasFirestoreWriteQuotaExceeded()) {
     throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
   }
   try {
     const docRef = doc(db, COLLECTION_HISTORY, historyId);
-    const now =
-      new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
-      ' ' +
-      new Date().toLocaleDateString('vi-VN');
     await runWriteWithQuotaGuard(
       () =>
         updateDoc(docRef, {
-          daPhat: !currentStatus,
-          ngayPhat: !currentStatus ? now : null,
+          daPhat: nextStatus,
+          ngayPhat: nextNgayPhat,
         }),
       6000
     );
@@ -914,6 +955,11 @@ export async function toggleHistoryDaPhat(historyId: string, currentStatus: bool
     if (isQuotaExceededError(err)) {
       markFirestoreWriteQuotaExceeded();
       throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
+    }
+    const errCode = (err as { code?: string } | null)?.code?.toLowerCase() || '';
+    const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    if (errCode === 'not-found' || errMsg.includes('no document to update')) {
+      return;
     }
     handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_HISTORY}/${historyId}`);
   }
@@ -923,6 +969,7 @@ export async function toggleHistoryDaPhat(historyId: string, currentStatus: bool
  * Xóa 1 dòng lịch sử tra cứu
  */
 export async function deleteHistoryItem(historyId: string): Promise<void> {
+  removeLocalSearchHistoryItem(historyId);
   if (hasFirestoreWriteQuotaExceeded()) {
     throw new Error(QUOTA_EXCEEDED_VI_MESSAGE);
   }

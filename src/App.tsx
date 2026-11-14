@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from './components/Navbar';
 import { SearchHero } from './components/SearchHero';
 import { HighlightedResultCard } from './components/HighlightedResultCard';
@@ -18,26 +18,18 @@ import { CertificateRecord, SyncStatus } from './types/certificate';
 import {
   initStorage,
   hydrateFromIndexedDb,
-  getLoadedCount,
   lookupByMssv,
   lookupByMssvOrName,
   cacheRecord,
   getSyncStatus,
   saveSyncStatus,
-  saveRecords,
-  saveAppsScriptUrl,
-  getSavedAppsScriptUrl,
-  switchDataSourceMode,
-  clearDemoRecordsIfNeeded,
 } from './services/storageService';
 import { initAuth } from './services/firebaseAuth';
-import { testFirestoreConnection, auth } from './services/firebaseConfig';
-import { queryAppsScript, syncAllFromAppsScript } from './services/appsScriptConnector';
+import { testFirestoreConnection } from './services/firebaseConfig';
 import { isAdminSessionActive, grantAdminSession } from './services/adminAuthService';
 import {
   fetchRecordFromCloud,
   fetchCloudSyncStatus,
-  saveCloudSyncStatus,
   fetchCertificatesForAdmin,
   recordSearchEvent,
   hasFirestoreWriteQuotaExceeded,
@@ -51,14 +43,12 @@ import {
   BookOpen,
   ShieldCheck,
   Flame,
-  HardDrive,
   Upload,
   Settings,
   Trash2,
   Users,
   AlertTriangle,
-  CheckCircle2,
-  RefreshCw,
+  Clock,
 } from 'lucide-react';
 
 export default function App() {
@@ -78,7 +68,6 @@ export default function App() {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [adminActionTarget, setAdminActionTarget] = useState<'data_source' | 'history' | null>(null);
   const [firebaseRefreshTick, setFirebaseRefreshTick] = useState(0);
-  const [searchDiagnostic, setSearchDiagnostic] = useState<string | null>(null);
   const [isWriteQuotaExhausted, setIsWriteQuotaExhausted] = useState(() =>
     hasFirestoreWriteQuotaExceeded()
   );
@@ -107,123 +96,24 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  const [isBgSyncingDrive, setIsBgSyncingDrive] = useState(false);
-  const bgDriveSyncTriggeredRef = useRef<string | null>(null);
-
   const sampleMssvs = ['B2101234', 'B2105678', 'B2209999', 'B2012001', 'B2201010'];
   const isOfficerAuthorized = isAdminAuthenticated || isLoggedInGoogle;
-  const activeMode: 'firebase' | 'drive' =
-    syncStatus.source === 'apps_script' || syncStatus.source === 'drive_oauth'
-      ? 'drive'
-      : 'firebase';
-
-  const triggerBackgroundAppsScriptSync = useCallback(async (appsScriptUrl: string) => {
-    const cleanUrl = appsScriptUrl.trim();
-    if (!cleanUrl || bgDriveSyncTriggeredRef.current === cleanUrl) return;
-    bgDriveSyncTriggeredRef.current = cleanUrl;
-    setIsBgSyncingDrive(true);
-    try {
-      const synced = await syncAllFromAppsScript(cleanUrl);
-      if (synced.success && synced.records && synced.records.length > 0) {
-        const finalFiles = synced.files || [];
-        saveRecords(
-          synced.records,
-          'apps_script',
-          finalFiles.map((f) => f.name),
-          {
-            driveFolderFound: true,
-            driveFolderName: synced.folderName || 'Số hóa chứng chỉ',
-            driveFolderId: synced.folderId,
-            driveFiles: finalFiles,
-          }
-        );
-        setSyncStatus(getSyncStatus());
-      }
-    } catch (err) {
-      console.warn('Đồng bộ nền Google Drive chưa hoàn tất (vẫn tra cứu trực tiếp được):', err);
-    } finally {
-      setIsBgSyncingDrive(false);
-    }
-  }, []);
 
   const refreshCloudMeta = useCallback(async () => {
     try {
       await testFirestoreConnection();
       const cloudMeta = await fetchCloudSyncStatus();
-      const current = getSyncStatus();
-
-      if (cloudMeta && cloudMeta.appsScriptUrl && cloudMeta.appsScriptUrl.trim()) {
-        saveAppsScriptUrl(cloudMeta.appsScriptUrl.trim());
-      }
-
       if (cloudMeta && cloudMeta.totalRecords >= 0) {
-        const isCloudAppsScript = cloudMeta.source === 'apps_script';
-        const isLocalDrive = current.source === 'drive_oauth' || current.source === 'apps_script';
-
-        if (isCloudAppsScript) {
-          clearDemoRecordsIfNeeded();
-          const localLoaded = getLoadedCount();
-          const mergedStatus: SyncStatus = {
-            ...current,
-            ...cloudMeta,
-            appsScriptUrl: cloudMeta.appsScriptUrl || getSavedAppsScriptUrl(),
-            totalRecords:
-              localLoaded > 0 && localLoaded >= cloudMeta.totalRecords * 0.5
-                ? localLoaded
-                : cloudMeta.totalRecords,
-            driveFiles: current.driveFiles,
-            driveFolderName: current.driveFolderName || 'Số hóa chứng chỉ',
-          };
-          setSyncStatus(mergedStatus);
-          saveSyncStatus(mergedStatus);
-
-          const resolvedUrl = mergedStatus.appsScriptUrl || getSavedAppsScriptUrl();
-          if (resolvedUrl && localLoaded < Math.max(1, cloudMeta.totalRecords * 0.5)) {
-            void triggerBackgroundAppsScriptSync(resolvedUrl);
-          }
-          return;
-        }
-
-        // Nếu máy này đang dùng OAuth Drive cục bộ thì giữ nguyên thống kê OAuth của máy này
-        if (isLocalDrive && current.source === 'drive_oauth') {
-          return;
-        }
-
         setSyncStatus(cloudMeta);
         saveSyncStatus(cloudMeta);
-      } else {
-        const localUrl = getSavedAppsScriptUrl();
-        if (current.source === 'apps_script' && localUrl && getLoadedCount() === 0) {
-          void triggerBackgroundAppsScriptSync(localUrl);
-        }
       }
     } catch (err) {
       console.warn('Đang sử dụng bộ nhớ đệm cục bộ:', err);
-      const localUrl = getSavedAppsScriptUrl();
-      const current = getSyncStatus();
-      if (current.source === 'apps_script' && localUrl && getLoadedCount() === 0) {
-        void triggerBackgroundAppsScriptSync(localUrl);
-      }
     }
-  }, [triggerBackgroundAppsScriptSync]);
+  }, []);
 
   useEffect(() => {
     initStorage();
-
-    // Hỗ trợ mở nhanh bằng link chia sẻ ?appsScript=... trên máy khác
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const sharedScriptUrl = params.get('appsScript');
-      if (sharedScriptUrl && sharedScriptUrl.includes('script.google.com/macros/')) {
-        saveAppsScriptUrl(sharedScriptUrl);
-        clearDemoRecordsIfNeeded();
-        const updated = switchDataSourceMode('drive');
-        setSyncStatus(updated);
-      }
-    } catch {
-      // ignore
-    }
-
     setSyncStatus(getSyncStatus());
     setIsAdminAuthenticated(isAdminSessionActive());
 
@@ -303,26 +193,6 @@ export default function App() {
     setIsAdminAuthenticated(isAdminSessionActive() || isLoggedInGoogle);
   };
 
-  const handleQuickSwitchMode = (mode: 'firebase' | 'drive') => {
-    const hasLoadedDriveData =
-      (syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') &&
-      getLoadedCount() > 0;
-    if (mode === 'drive' && !getSavedAppsScriptUrl() && !hasLoadedDriveData) {
-      const updated = switchDataSourceMode('drive');
-      setSyncStatus(updated);
-      openModalWithTab('drive_config');
-      return;
-    }
-    if (mode === 'drive') {
-      clearDemoRecordsIfNeeded();
-    }
-    const updated = switchDataSourceMode(mode);
-    setSyncStatus(updated);
-    if (auth.currentUser) {
-      saveCloudSyncStatus(updated).catch(console.warn);
-    }
-  };
-
   const handleSearch = async (rawQuery: string) => {
     const trimmed = rawQuery.trim();
     if (!trimmed) return;
@@ -334,106 +204,8 @@ export default function App() {
     setResult(null);
     setMatchingList([]);
     setNotFoundMssv(null);
-    setSearchDiagnostic(null);
 
-    const appsScriptUrl = getSavedAppsScriptUrl() || syncStatus.appsScriptUrl || '';
-    if (activeMode === 'drive') {
-      const loadedCount = getLoadedCount();
-      const isFullDriveIndexLoaded =
-        syncStatus.source === 'drive_oauth' ||
-        (loadedCount > 0 && loadedCount >= Math.max(1, syncStatus.totalRecords * 0.5));
-
-      // 1. Tìm trong bộ nhớ dữ liệu Drive (ưu tiên tìm exact MSSV hoặc khi đã nạp đủ toàn bộ chỉ mục)
-      if (loadedCount > 0) {
-        if (looksLikeMssv) {
-          const exactLocal = lookupByMssv(cleanUpper);
-          if (exactLocal) {
-            setResult(exactLocal);
-            recordSearchEvent(exactLocal, exactLocal.mssv).catch(console.warn);
-            setIsSearching(false);
-            return;
-          }
-        }
-        if (isFullDriveIndexLoaded) {
-          const localDriveMatches = lookupByMssvOrName(trimmed);
-          if (localDriveMatches.length === 1) {
-            setResult(localDriveMatches[0]);
-            recordSearchEvent(localDriveMatches[0], localDriveMatches[0].mssv).catch(console.warn);
-            setIsSearching(false);
-            return;
-          }
-          if (localDriveMatches.length > 1) {
-            setMatchingList(localDriveMatches);
-            setIsSearching(false);
-            return;
-          }
-        }
-      }
-
-      // 2. Nếu chưa có trong bộ nhớ đệm và có link Apps Script, truy vấn trực tiếp Google Drive
-      if (appsScriptUrl) {
-        try {
-          const response = await queryAppsScript(appsScriptUrl, trimmed);
-          if (!response.success) {
-            setNotFoundMssv(trimmed);
-            setSearchDiagnostic(
-              response.error ||
-                'Không thể đọc dữ liệu từ Google Apps Script. Hãy mở Cài đặt Kết nối -> tab 2. Google Drive -> bấm "Kiểm tra & Nạp dữ liệu" để xem trạng thái từng file.'
-            );
-            setIsSearching(false);
-            return;
-          }
-
-          const matches =
-            response.matches && response.matches.length > 0
-              ? response.matches
-              : response.data
-              ? [response.data]
-              : [];
-
-          if (matches.length === 1) {
-            cacheRecord(matches[0]);
-            setResult(matches[0]);
-            recordSearchEvent(matches[0], matches[0].mssv || cleanUpper).catch(console.warn);
-          } else if (matches.length > 1) {
-            matches.forEach(cacheRecord);
-            setMatchingList(matches);
-          } else {
-            const errorFiles = (response.files || []).filter((f) => f.status === 'error');
-            if (errorFiles.length > 0) {
-              setSearchDiagnostic(
-                `Có ${errorFiles.length} file Excel trong Drive bị lỗi đọc dữ liệu: ${errorFiles.map((f) => `${f.name} (${f.error})`).join('; ')}`
-              );
-            } else if ((response.files || []).length === 0) {
-              setSearchDiagnostic(
-                'Apps Script đã kết nối nhưng chưa thấy file Excel (.xlsx, .xls, .csv) hoặc Google Sheets nào trong thư mục "Số hóa chứng chỉ".'
-              );
-            }
-            setNotFoundMssv(trimmed);
-            recordSearchEvent(null, cleanUpper).catch(console.warn);
-          }
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : 'Lỗi kết nối Google Apps Script';
-          setNotFoundMssv(trimmed);
-          setSearchDiagnostic(`Lỗi kết nối Google Apps Script: ${msg}`);
-        } finally {
-          setIsSearching(false);
-        }
-        return;
-      }
-
-      // 3. Chế độ 2 chưa kết nối file nào
-      if (loadedCount === 0) {
-        setSearchDiagnostic(
-          'Chế độ 2 (Google Drive) hiện chưa nhận được Link Apps Script hoặc chưa tải dữ liệu từ file Excel nào. Cán bộ quản trị hãy mở "Cài đặt Kết nối" -> tab "2. Google Drive", đăng nhập Google Admin và bấm "Kiểm tra & Nạp dữ liệu" để đồng bộ cho mọi máy.'
-        );
-      }
-      setNotFoundMssv(trimmed);
-      setIsSearching(false);
-      return;
-    }
-
-    // Mode 1: Firebase Cloud + High-speed Index
+    // Firebase Cloud Firestore + High-speed IndexedDB / RAM Index
     let match: CertificateRecord | null = null;
 
     if (looksLikeMssv) {
@@ -445,7 +217,7 @@ export default function App() {
       } catch (e) {
         console.warn('Lỗi tìm kiếm Cloud Firestore:', e);
       }
-      if (!match && syncStatus.source === 'demo_data') {
+      if (!match) {
         match = lookupByMssv(cleanUpper);
       }
     }
@@ -524,42 +296,32 @@ export default function App() {
         sampleMssvs={sampleMssvs}
       />
 
-      {/* Admin Quick-Switch Bar (ONLY visible after Admin authentication) */}
+      {/* Officer Quick-Action Bar (visible after PIN or Firebase Admin authentication) */}
       {isOfficerAuthorized && (
         <div className="bg-white border-b border-blue-200 shadow-2xs">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
             <div className="flex items-center flex-wrap gap-2">
               <span className="font-extrabold text-[#002855] uppercase tracking-wider text-[11px] flex items-center gap-1">
                 <ShieldCheck className="w-4 h-4 text-[#00529C]" />
-                Nguồn tra cứu:
+                Hệ thống lưu trữ:
               </span>
-              <button
-                type="button"
-                onClick={() => handleQuickSwitchMode('firebase')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                  activeMode === 'firebase'
-                    ? 'bg-[#004B8D] text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold bg-[#004B8D] text-white shadow-xs">
                 <Flame className="w-3.5 h-3.5 text-amber-300" />
-                <span>Chế độ 1: Firebase Cloud</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickSwitchMode('drive')}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                  activeMode === 'drive'
-                    ? 'bg-[#004B8D] text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                <HardDrive className="w-3.5 h-3.5 text-sky-300" />
-                <span>Chế độ 2: Google Drive ("Số hóa chứng chỉ")</span>
-              </button>
+                <span>
+                  Firebase Cloud ({syncStatus.totalRecords.toLocaleString('vi-VN')} chứng chỉ)
+                </span>
+              </span>
             </div>
 
             <div className="flex items-center flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleOpenHistoryModal}
+                className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold px-3 py-1.5 rounded-xl border border-amber-300 cursor-pointer"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-700" />
+                <span>Lịch sử phát bằng</span>
+              </button>
               <button
                 type="button"
                 onClick={() => openModalWithTab('upload')}
@@ -586,53 +348,8 @@ export default function App() {
               </button>
             </div>
           </div>
-          {activeMode === 'drive' && (
-            <div className="bg-sky-50 border-t border-sky-200 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-slate-800">
-              <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-start gap-2">
-                  {(syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  )}
-                  <div className="space-y-0.5">
-                    <div>
-                      {(syncStatus.source === 'drive_oauth' || syncStatus.source === 'apps_script') && syncStatus.totalRecords > 0 ? (
-                        <>
-                          <strong className="text-emerald-800">
-                            Đã kết nối Google Drive ({syncStatus.fileCount} file • {syncStatus.totalRecords.toLocaleString('vi-VN')} chứng chỉ):
-                          </strong>{' '}
-                          <span className="font-mono text-[11px] text-slate-600">
-                            {(syncStatus.fileNames || []).slice(0, 4).join(', ')}
-                            {(syncStatus.fileNames || []).length > 4 ? ` (+${syncStatus.fileNames.length - 4} file)` : ''}
-                          </span>
-                          {isBgSyncingDrive && (
-                            <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold text-[#004B8D]">
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                              Đang đồng bộ về máy này...
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-amber-900">
-                          <strong>Chế độ 2 chưa tải file Excel từ Google Drive:</strong> Vui lòng mở cài đặt Google Drive để quét thư mục "Số hóa chứng chỉ" (1-Click) hoặc dán link Apps Script.
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openModalWithTab('drive_config')}
-                  className="shrink-0 inline-flex items-center gap-1.5 bg-[#004B8D] hover:bg-[#00529C] text-white font-bold px-3 py-1 rounded-lg cursor-pointer self-start sm:self-auto"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Kiểm tra &amp; Tải Drive</span>
-                </button>
-              </div>
-            </div>
-          )}
-          {isWriteQuotaExhausted && activeMode === 'firebase' && (
+
+          {isWriteQuotaExhausted && (
             <div className="bg-amber-50 border-t border-amber-200 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-amber-950">
               <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="flex items-start gap-2">
@@ -647,7 +364,7 @@ export default function App() {
                     >
                       firebase.google.com/pricing
                     </a>
-                    ). Tra cứu vẫn chạy bình thường; để ghi thêm dữ liệu ngay, hãy dán Firebase Config riêng hoặc chuyển sang Chế độ 2 (Google Drive).
+                    ). Tra cứu vẫn chạy bình thường; để ghi thêm dữ liệu ngay, hãy dán Firebase Config riêng trong Cài đặt.
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0 pl-6 sm:pl-0">
@@ -729,7 +446,6 @@ export default function App() {
               onRetry={() => handleSearch(notFoundMssv)}
               sampleMssvs={sampleMssvs}
               onSelectSample={handleSearch}
-              diagnosticMessage={searchDiagnostic}
             />
           </div>
         )}
@@ -756,7 +472,7 @@ export default function App() {
                   Nhập MSSV hoặc Họ Tên
                 </h4>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Nhập Mã số sinh viên (hoặc Họ tên) để hệ thống tìm kiếm tức thì trên Cloud Firestore hoặc thư mục Google Drive.
+                  Nhập Mã số sinh viên (hoặc Họ tên) để hệ thống tìm kiếm tức thì trên cơ sở dữ liệu đám mây Cloud Firestore.
                 </p>
               </div>
 
@@ -799,7 +515,7 @@ export default function App() {
                     Bảo Mật &amp; Phân Quyền Dữ Liệu — Đại học Cần Thơ
                   </div>
                   <div className="text-blue-200 text-xs mt-0.5">
-                    Sinh viên tra cứu công khai nhanh chóng; mọi thao tác nạp Excel, chuyển nguồn và xóa dữ liệu được bảo vệ bằng quyền Quản trị viên.
+                    Sinh viên tra cứu công khai nhanh chóng; cán bộ dùng mã PIN quản trị để theo dõi lịch sử phát bằng và tài khoản Quản trị để nạp/xóa dữ liệu.
                   </div>
                 </div>
               </div>
@@ -878,6 +594,7 @@ export default function App() {
         isOpen={isAdminPasswordModalOpen}
         onClose={() => setIsAdminPasswordModalOpen(false)}
         onSuccess={handleAdminPasswordSuccess}
+        defaultMode={adminActionTarget === 'history' ? 'pin' : 'firebase'}
       />
 
       <DeployGuideModal

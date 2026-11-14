@@ -1,4 +1,4 @@
-import { CertificateRecord, SyncStatus, DataSourceType, DriveFileDiagnostic } from '../types/certificate';
+import { CertificateRecord, SyncStatus, DataSourceType } from '../types/certificate';
 import { INITIAL_DEMO_RECORDS } from './mockData';
 import {
   saveRecordsToIndexedDb,
@@ -8,8 +8,6 @@ import {
 
 const STORAGE_KEY_RECORDS = 'gdqp_certificate_records_v1';
 const STORAGE_KEY_STATUS = 'gdqp_sync_status_v1';
-const STORAGE_KEY_APPS_SCRIPT_URL = 'gdqp_apps_script_url_v1';
-const STORAGE_KEY_DRIVE_FOLDER_URL = 'gdqp_drive_folder_url_v1';
 
 // In-memory index: normalized MSSV -> CertificateRecord
 const recordsIndex = new Map<string, CertificateRecord>();
@@ -25,59 +23,20 @@ function normalizeSearchText(str: string): string {
     .trim();
 }
 
-export function getSavedAppsScriptUrl(): string {
-  try {
-    return localStorage.getItem(STORAGE_KEY_APPS_SCRIPT_URL) || '';
-  } catch {
-    return '';
-  }
-}
-
-export function saveAppsScriptUrl(url: string): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_APPS_SCRIPT_URL, url.trim());
-  } catch (e) {
-    console.error('Không thể lưu Apps Script URL:', e);
-  }
-}
-
-export function getSavedDriveFolderUrl(): string {
-  try {
-    return localStorage.getItem(STORAGE_KEY_DRIVE_FOLDER_URL) || '';
-  } catch {
-    return '';
-  }
-}
-
-export function saveDriveFolderUrl(url: string): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_DRIVE_FOLDER_URL, url.trim());
-  } catch (e) {
-    console.error('Không thể lưu Drive Folder URL:', e);
-  }
-}
-
-/**
- * Trích xuất Folder ID từ link chia sẻ Google Drive (hoặc trả về nguyên ID nếu người dùng dán thẳng ID)
- */
-export function extractDriveFolderId(input: string): string {
-  const clean = input.trim();
-  if (!clean) return '';
-  const folderMatch = clean.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  if (folderMatch) return folderMatch[1];
-  const idMatch = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (idMatch) return idMatch[1];
-  if (/^[a-zA-Z0-9_-]{15,}$/.test(clean) && !clean.includes('http')) {
-    return clean;
-  }
-  return '';
-}
-
 export function getSyncStatus(): SyncStatus {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_STATUS);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw) as Partial<SyncStatus> & { source?: string };
+      const normalizedSource: DataSourceType =
+        parsed.source === 'demo_data' ? 'demo_data' : 'local_excel';
+      return {
+        source: normalizedSource,
+        totalRecords: Number(parsed.totalRecords || 0),
+        lastUpdated: String(parsed.lastUpdated || new Date().toLocaleDateString('vi-VN')),
+        fileCount: Number(parsed.fileCount || 0),
+        fileNames: Array.isArray(parsed.fileNames) ? parsed.fileNames : [],
+      };
     }
   } catch (e) {
     console.error('Lỗi đọc sync status:', e);
@@ -89,36 +48,22 @@ export function getSyncStatus(): SyncStatus {
     lastUpdated: new Date().toLocaleDateString('vi-VN'),
     fileCount: 3,
     fileNames: ['So_hoa_GDQP_K47_Dot1.xlsx', 'So_hoa_GDQP_K48_Dot2.xlsx', 'So_hoa_GDQP_K46_Dot_Vet.xlsx'],
-    appsScriptUrl: getSavedAppsScriptUrl(),
   };
 }
 
 export function saveSyncStatus(status: SyncStatus): void {
   try {
-    localStorage.setItem(STORAGE_KEY_STATUS, JSON.stringify(status));
+    const clean: SyncStatus = {
+      source: status.source === 'demo_data' ? 'demo_data' : 'local_excel',
+      totalRecords: Number(status.totalRecords || 0),
+      lastUpdated: String(status.lastUpdated || new Date().toLocaleString('vi-VN')),
+      fileCount: Number(status.fileCount || 0),
+      fileNames: Array.isArray(status.fileNames) ? status.fileNames : [],
+    };
+    localStorage.setItem(STORAGE_KEY_STATUS, JSON.stringify(clean));
   } catch (e) {
     console.error('Lỗi lưu sync status:', e);
   }
-}
-
-export function switchDataSourceMode(mode: 'firebase' | 'drive'): SyncStatus {
-  const current = getSyncStatus();
-  const hasAppsScript = Boolean(getSavedAppsScriptUrl());
-  const nextSource: DataSourceType =
-    mode === 'drive'
-      ? hasAppsScript
-        ? 'apps_script'
-        : 'drive_oauth'
-      : 'local_excel';
-
-  const updated: SyncStatus = {
-    ...current,
-    source: nextSource,
-    appsScriptUrl: getSavedAppsScriptUrl(),
-    lastUpdated: new Date().toLocaleString('vi-VN'),
-  };
-  saveSyncStatus(updated);
-  return updated;
 }
 
 export function initStorage(): CertificateRecord[] {
@@ -167,13 +112,7 @@ export async function hydrateFromIndexedDb(): Promise<number> {
 export function saveRecords(
   records: CertificateRecord[],
   source: DataSourceType,
-  fileNames: string[],
-  driveMeta?: {
-    driveFolderFound?: boolean;
-    driveFolderName?: string;
-    driveFolderId?: string;
-    driveFiles?: DriveFileDiagnostic[];
-  }
+  fileNames: string[]
 ): void {
   recordsIndex.clear();
   for (const r of records) {
@@ -198,8 +137,6 @@ export function saveRecords(
     lastUpdated: new Date().toLocaleString('vi-VN'),
     fileCount: fileNames.length,
     fileNames,
-    appsScriptUrl: getSavedAppsScriptUrl(),
-    ...(driveMeta || {}),
   });
 }
 
@@ -246,7 +183,6 @@ export function appendRecords(
     lastUpdated: new Date().toLocaleString('vi-VN'),
     fileCount: updatedFiles.length,
     fileNames: updatedFiles,
-    appsScriptUrl: getSavedAppsScriptUrl(),
   });
 
   return { total: recordsIndex.size, added };
@@ -267,25 +203,7 @@ export function clearAllLocalRecords(): void {
     lastUpdated: new Date().toLocaleString('vi-VN'),
     fileCount: 0,
     fileNames: [],
-    appsScriptUrl: getSavedAppsScriptUrl(),
   });
-}
-
-/**
- * Xóa dữ liệu mẫu khỏi RAM/LocalStorage nếu máy mới đang giữ dữ liệu demo trước khi nhận cấu hình Drive từ Cloud
- */
-export function clearDemoRecordsIfNeeded(): void {
-  if (recordsIndex.size === 0 || recordsIndex.size > INITIAL_DEMO_RECORDS.length) return;
-  const demoIds = new Set(INITIAL_DEMO_RECORDS.map((r) => r.id));
-  const allAreDemo = Array.from(recordsIndex.values()).every((r) => demoIds.has(r.id));
-  if (allAreDemo) {
-    recordsIndex.clear();
-    try {
-      localStorage.removeItem(STORAGE_KEY_RECORDS);
-    } catch {
-      // ignore
-    }
-  }
 }
 
 export function cacheRecord(record: CertificateRecord): void {

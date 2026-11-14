@@ -78,38 +78,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden sm:inline">{isDarkMode ? 'Nền sáng' : 'Nền tối (XP)'}</span>
           </button>
 
-          {/* Active Mode Badge (Only visible to authenticated Admin) */}
+          {/* Active Cloud Badge (Only visible to authenticated Officer) */}
           {isOfficerAuthorized && (
             <>
               <button
                 type="button"
                 onClick={onOpenDataSourceModal}
                 className="hidden sm:flex items-center space-x-2 text-xs bg-blue-900/80 border border-sky-400/40 text-sky-100 hover:bg-blue-800 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer"
-                title={userEmail ? `Cán bộ: ${userEmail}` : 'Chuyển đổi nguồn dữ liệu'}
+                title={userEmail ? `Cán bộ: ${userEmail}` : 'Quản lý dữ liệu Firebase Cloud'}
               >
                 <span className="font-semibold text-white">
-                  {syncStatus.source === 'apps_script'
-                    ? 'Google Drive ("Số hóa chứng chỉ")'
-                    : syncStatus.source === 'drive_oauth'
-                    ? 'Drive + Firebase'
-                    : syncStatus.source === 'local_excel'
-                    ? 'Firebase Cloud'
-                    : 'Dữ liệu mẫu'}
+                  {syncStatus.source === 'demo_data' ? 'Dữ liệu mẫu' : 'Firebase Cloud'}
                 </span>
                 <span className="bg-[#001833] text-amber-300 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-blue-400/30">
                   {syncStatus.totalRecords.toLocaleString('vi-VN')}
                 </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onOpenHistoryModal}
-                className="flex items-center space-x-1.5 text-xs bg-[#003B73] hover:bg-[#004B8D] text-amber-200 border border-amber-400/40 px-2.5 py-1.5 rounded-lg font-semibold transition-all cursor-pointer shadow-sm"
-                title="Xem lịch sử sinh viên tra cứu (Dành cho Cán bộ phát bằng)"
-              >
-                <Clock className="w-3.5 h-3.5 text-amber-300" />
-                <span className="hidden md:inline">Lịch sử phát bằng</span>
-                <span className="md:hidden">Lịch sử</span>
               </button>
 
               <button
@@ -123,7 +106,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             </>
           )}
 
-          {/* Admin Settings Button (Always visible, protected by Admin Auth) */}
+          {/* Search History & Certificate Issuance Button (PIN-protected, no Firebase Admin required) */}
+          <button
+            type="button"
+            onClick={onOpenHistoryModal}
+            className="flex items-center space-x-1.5 text-xs bg-[#003B73] hover:bg-[#004B8D] text-amber-200 border border-amber-400/40 px-2.5 py-1.5 rounded-lg font-semibold transition-all cursor-pointer shadow-sm"
+            title="Xem lịch sử sinh viên tra cứu & cập nhật Đã phát bằng (Chỉ cần mã PIN quản trị)"
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-300" />
+            <span className="hidden md:inline">Lịch sử phát bằng</span>
+            <span className="md:hidden">Lịch sử</span>
+          </button>
+
+          {/* Admin Settings Button */}
           <button
             type="button"
             onClick={onOpenDataSourceModal}
@@ -135,7 +130,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             ) : (
               <Lock className="w-3.5 h-3.5 text-amber-300" />
             )}
-            <span>{isOfficerAuthorized ? 'Cài đặt Hệ thống' : 'Cài đặt Kết nối (Admin)'}</span>
+            <span>{isOfficerAuthorized ? 'Cài đặt Hệ thống' : 'Cài đặt (Admin)'}</span>
           </button>
         </div>
       </div>
